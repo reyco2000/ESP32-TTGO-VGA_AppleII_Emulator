@@ -10,7 +10,8 @@ extern fabgl::Keyboard *keyboard_ptr;
 Supervisor::Supervisor(Apple2Machine* m)
 {
 	machine = m;
-	backbuffer = (AppleColor*)ps_malloc(SCREENSIZE_X * SCREENSIZE_Y * sizeof(AppleColor));
+	vga = NULL;
+	dirty = true;
 	font.Create();
 	active = false;
 	mode = BROWSE;
@@ -25,12 +26,12 @@ Supervisor::Supervisor(Apple2Machine* m)
 
 Supervisor::~Supervisor()
 {
-	free(backbuffer);
 }
 
 void Supervisor::Open()
 {
 	active = true;
+	dirty = true;
 	mode = BROWSE;
 	SetStatus("");
 	ScanDir();
@@ -64,7 +65,7 @@ void Supervisor::DrawText(int col, int row, const char* text, bool inverse)
 			g -= 32;
 		if (g < 0x20 || g > 0x5F)
 			g = 0x20;
-		font.RenderFont(backbuffer, g, (col + i) * FONT_X, row * FONT_Y, inverse);
+		font.RenderFont(vga, g, (col + i) * FONT_X, row * FONT_Y, inverse);
 	}
 }
 
@@ -97,6 +98,9 @@ void Supervisor::Update()
 		if (vk == fabgl::VK_NONE || !keyDown)
 			continue;
 
+		// every state change in this menu originates from a keypress
+		dirty = true;
+
 		if (mode == PICK_DRIVE)
 		{
 			char ascii = keyboard_ptr->virtualKeyToASCII(vk);
@@ -124,9 +128,20 @@ void Supervisor::Update()
 	}
 }
 
-void Supervisor::Render(VGA* vga)
+void Supervisor::Render(VGA* vgaOut)
 {
-	memset(backbuffer, 0, SCREENSIZE_X * SCREENSIZE_Y * sizeof(AppleColor));
+	vga = vgaOut;
+	if (vga == NULL)
+		return;
+
+	// The menu is painted straight into the live framebuffer, so clearing and
+	// repainting it every frame is visible as flicker. Nothing else draws
+	// while the supervisor is up, so repaint only when something changed.
+	if (!dirty)
+		return;
+	dirty = false;
+
+	vga->clear(0);
 
 	DrawRow(0, "              SUPERVISOR", false);
 
@@ -160,14 +175,6 @@ void Supervisor::Render(VGA* vga)
 
 	DrawRow(22, curPath, false);
 	DrawRow(23, " ARROWS:MOVE  ENTER:SELECT  ESC:EXIT", false);
-
-	// same backbuffer->scanline copy the emulator uses (Apple2Machine::Render)
-	for (int y = 0; y < SCREENSIZE_Y; y++)
-		for (int x = 0; x < SCREENSIZE_X; x++)
-		{
-			AppleColor c = backbuffer[y * SCREENSIZE_X + x];
-			vga->dot(x, y, vga->rgb(c.r, c.g, c.b));
-		}
 }
 
 //////////////////////////////////////////////////////////////////////////

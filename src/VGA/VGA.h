@@ -41,6 +41,13 @@ public:
 		}
 	}
 
+	// Scanline pointer for a whole row. Callers blitting a full frame should
+	// fetch this once per row instead of paying getScanline() per pixel.
+	uint8_t *row(int y)
+	{
+		return DisplayController.getScanline(y);
+	}
+
 	int rgb(uint8_t r, uint8_t g, uint8_t b)
 	{
 		return ((b >> 6) << 4) | ((g >> 6) << 2) | (r >> 6);

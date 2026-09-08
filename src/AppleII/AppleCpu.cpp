@@ -11,6 +11,7 @@
 
 CPU::CPU()
 {
+	fastDiskDelay = true;
 	DEBUG_PRINTLN("Construct CPU");
 	tick = 0;
 	InitInstructionName();
@@ -295,6 +296,34 @@ int CPU::Run(Memory &mem, long long _cycle)
 		long long prevcycle = cycle;
 
 		WORD prevPC = PC;
+		if (PC == 0xBD9E && fastDiskDelay)
+		{
+			// DOS 3.3 RWTS waits here for a physical drive to reach speed:
+			//   BD9E A0 12     LDY #$12
+			//   BDA0 88        DEY
+			//   BDA1 D0 FD     BNE $BDA0
+			//   BDA3 E6 46     INC $46
+			//   BDA5 D0 F7     BNE $BD9E
+			//   BDA7 E6 47     INC $47
+			//   BDA9 D0 F3     BNE $BD9E
+			// It is pure cycle-burning with no I/O, and our drive is always
+			// up to speed. Verify the exact opcode signature before touching
+			// anything, then finish the counter and fall through to $BDAB.
+			static const BYTE sig[] = { 0xA0,0x12,0x88,0xD0,0xFD,0xE6,0x46,
+			                            0xD0,0xF7,0xE6,0x47,0xD0,0xF3 };
+			bool match = true;
+			for (int i = 0; i < (int)sizeof(sig); i++)
+				if (mem.ReadByte(0xBD9E + i) != sig[i]) { match = false; break; }
+
+			if (match)
+			{
+				mem.WriteByte(0x46, 0);   // what the loop would have left behind
+				mem.WriteByte(0x47, 0);
+				PC = 0xBDAB;
+				cycle -= 10;              // token cost, not the real ~830k
+				continue;
+			}
+		}
 		// 여기에서 cycle 하나 소모
 		BYTE inst = Fetch(mem, cycle);
 		lastInst = inst;

@@ -9,6 +9,7 @@
 
 class CPU;	// 6502 cpu
 class Memory;
+class VGA;
 
 struct _RECT
 {
@@ -74,6 +75,9 @@ public:
 	_RECT pixelGR;
 
 	int LoResCache[24][40];
+	// text cells already drawn: glyph | 0x100 when drawn inverse, -1 = dirty.
+	// TEXT had no cache, so every frame redrew all 960 cells (53,760 pixels).
+	int TextCache[24][40];
 	int HiResCache[192][40];
 	BYTE previousBit[192][40];
 	BYTE flashCycle;
@@ -81,7 +85,9 @@ public:
 
 private:
 	CPU* cpu;
-	AppleColor* backbuffer;	// Render Backbuffer
+	// Set for the duration of Render(); the drawing helpers below write
+	// straight into the VGA framebuffer, so there is no backbuffer.
+	VGA* vga;
 	//Texture2D renderTexture;
 	//Image renderImage;
 
@@ -146,7 +152,7 @@ public:
 
 	BYTE SoftSwitch(Memory* mem, WORD address, BYTE value, bool WRT);
 	void PlaySound();
-	void Render( Memory& mem, int frame);
+	void Render( Memory& mem, int frame, VGA* vga);
 
 	void UpdateInput();
 
@@ -156,7 +162,7 @@ public:
 	bool GetDiskMotorState();
 	std::string GetDiskName(int i);
 
-	AppleColor *getBackBuffer();
+
 };
 
 

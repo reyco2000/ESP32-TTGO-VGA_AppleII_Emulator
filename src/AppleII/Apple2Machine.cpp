@@ -147,16 +147,9 @@ void Apple2Machine::Run(long long cycle)
 
 void Apple2Machine::Render(VGA *vga, int frame)
 {
-	device.Render(mem, frame);
-
-	AppleColor * backbuffer = device.getBackBuffer();
-	for(int y=0; y<SCREENSIZE_Y; y++)
-		for(int x=0; x<SCREENSIZE_X; x++)
-		{
-			AppleColor color = backbuffer[y*SCREENSIZE_X+x];
-			//Serial.printf("Color : %d / %d / %d\n", color.r, color.g, color.b);
-			vga->dot(x,y,vga->rgb(color.r, color.g, color.b));
-		}
+	// Device draws into the VGA framebuffer itself - no backbuffer, no blit,
+	// so an unchanged screen costs nothing beyond the dirty-cell checks.
+	device.Render(mem, frame, vga);
 }
 
 

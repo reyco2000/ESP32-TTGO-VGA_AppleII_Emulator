@@ -4,6 +4,7 @@
 #include "AppleMem.h"
 #include "Apple2Device.h"
 #include "AppleFont.h"
+#include "../VGA/VGA.h"
 #include "fabgl.h"
 
 extern fabgl::Keyboard *keyboard_ptr;
@@ -61,14 +62,12 @@ const int hcolor[16][3] = {                                                   //
 Apple2Device::Apple2Device()
 {
 	DEBUG_PRINTLN("Construct Apple2Device");
-	backbuffer = NULL;
+	vga = NULL;
 	Reset();
 }
 
 Apple2Device::~Apple2Device()
 {
-	if (backbuffer != NULL)
-		free(backbuffer);
 }
 
 void Apple2Device::Create(CPU* cpu)
@@ -77,17 +76,7 @@ void Apple2Device::Create(CPU* cpu)
 	font.Create();
 	zoomscale = 3;
 
-	// 스크린 백버퍼
-	backbuffer = (AppleColor*)ps_malloc(SCREENSIZE_X * SCREENSIZE_Y * sizeof(AppleColor));
-	ClearScreen();
-/*
-	renderImage.data = backbuffer;
-	renderImage.width = SCREENSIZE_X;
-	renderImage.height = SCREENSIZE_Y;
-	renderImage.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-	renderImage.mipmaps = 1;
-	renderTexture = LoadTextureFromImage(renderImage);
-*/
+	// No screen backbuffer: Render() draws into the VGA framebuffer directly.
 
 	//////////////////////////////////////////////////////////////////////////
 }
@@ -127,6 +116,7 @@ void Apple2Device::Reset()
 
 	//videoAddress = videoPage * 0x0400;
 	memset(LoResCache, 0, sizeof(LoResCache));
+	memset(TextCache, 0xFF, sizeof(TextCache));
 	memset(HiResCache, 0, sizeof(HiResCache));
 	memset(previousBit, 0, sizeof(previousBit));
 	flashCycle = 0;
@@ -309,14 +299,17 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 		// Shift Data Latch
 		case 0xC0EC:                                                                
 		{
-			// writting
-			if (disk[currentDrive].writeMode)
-				disk[currentDrive].data[disk[currentDrive].track * 0x1A00 + disk[currentDrive].nibble] = dLatch;
-			else
+			int idx = disk[currentDrive].track * 0x1A00 + disk[currentDrive].nibble;
+			if (idx < 0 || idx >= DISKSIZE)
 			{
-				// reading
-				dLatch = disk[currentDrive].data[disk[currentDrive].track * 0x1A00 + disk[currentDrive].nibble];
+				// head parked beyond the 35 tracks a .nib actually holds:
+				// leave the latch alone rather than running off the buffer
 			}
+			else if (disk[currentDrive].writeMode)
+				disk[currentDrive].data[idx] = dLatch;                                  // writing
+			else
+				dLatch = disk[currentDrive].data[idx];                                  // reading
+
 			// turn floppy of 1 nibble
 			disk[currentDrive].nibble = (disk[currentDrive].nibble + 1) % 0x1A00;
 		}
@@ -408,12 +401,21 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 
 void Apple2Device::ClearScreen()
 {
+	if (vga == NULL)
+		return;
+
+	const int black = vga->rgb(0, 0, 0);
 	for (int y = 0; y < SCREENSIZE_Y; y++)
+	{
+		unsigned char* scanline = vga->row(y);
+		if (scanline == NULL)
+			continue;
 		for (int x = 0; x < SCREENSIZE_X; x++)
 		{
-			AppleColor color(0, 30, 0);
-			backbuffer[y * SCREENSIZE_X + x] = color;
+			int t = x ^ 2;
+			scanline[t] = (scanline[t] & 0xC0) | black;
 		}
+	}
 }
 
 void Apple2Device::DrawPoint(int x, int y, int r, int g, int b)
@@ -435,7 +437,7 @@ void Apple2Device::DrawPoint(int x, int y, int r, int g, int b)
 		//color.a = 0xff;
 	}
 
-	backbuffer[y * SCREENSIZE_X + x] = color;
+	vga->dot(x, y, vga->rgb(color.r, color.g, color.b));
 }
 
 void Apple2Device::DrawRect(_RECT rect, int r, int g, int b)
@@ -477,8 +479,12 @@ int Apple2Device::GetScreenMode()
 	HIRES : 280×192 (MIX 280×160)
 	MIX일경우에 하단은 TEXT( 4Line : 32 pixel )
 */
-void Apple2Device::Render(Memory &mem, int frame)
+void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 {
+	vga = vgaOut;
+	if (vga == NULL)
+		return;
+
 	int screenmode = GetScreenMode();
 
 	// video Page에 따라 Address가 달라짐
@@ -608,13 +614,14 @@ void Apple2Device::Render(Memory &mem, int frame)
 				if (glyph > 0x5F) glyph &= 0x3F; // shifts to match
 				if (glyph < 0x20) glyph |= 0x40; // the ASCII codes
 
-				if (fontattr == FONT_NORMAL || (fontattr == FONT_FLASH && frame < 15))
+				bool inverse = !(fontattr == FONT_NORMAL || (fontattr == FONT_FLASH && frame < 15));
+
+				// only redraw a cell whose glyph or flash phase actually changed
+				int drawn = glyph | (inverse ? 0x100 : 0);
+				if (TextCache[line][col] != drawn || !flashCycle)
 				{
-					font.RenderFont(backbuffer, glyph, col * FONT_X, line * FONT_Y, false);
-				}
-				else
-				{
-					font.RenderFont(backbuffer, glyph, col * FONT_X, line * FONT_Y, true);
+					TextCache[line][col] = drawn;
+					font.RenderFont(vga, glyph, col * FONT_X, line * FONT_Y, inverse);
 				}
 			}
 		}
@@ -690,6 +697,7 @@ void Apple2Device::Unmount(int drive)
 void Apple2Device::InvalidateRenderCache()
 {
 	memset(LoResCache, 0xFF, sizeof(LoResCache));
+	memset(TextCache, 0xFF, sizeof(TextCache));
 	memset(HiResCache, 0xFF, sizeof(HiResCache));
 	memset(previousBit, 0, sizeof(previousBit));
 }
@@ -851,8 +859,4 @@ void Apple2Device::LoadDump(FILE* fp)
 
 }
 
-// Surface backbuffer
-AppleColor * Apple2Device::getBackBuffer()
-{
-	return backbuffer;
-}
+

@@ -3,6 +3,7 @@
 
 #include "Predef.h"
 
+class VGA;
 
 class AppleFont
 {
@@ -16,7 +17,10 @@ public:
 	~AppleFont();
 
 	void Create();
-	void RenderFont(AppleColor *backbuffer, int fontnum, int x, int y, bool inv);
+	// Draws straight into the VGA framebuffer. There is no intermediate
+	// backbuffer: the framebuffer itself persists between frames, which is
+	// what lets the callers' dirty-cell caches skip unchanged glyphs.
+	void RenderFont(VGA *vga, int fontnum, int x, int y, bool inv);
 
 };
 
