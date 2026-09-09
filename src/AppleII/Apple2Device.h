@@ -9,6 +9,7 @@
 
 class CPU;	// 6502 cpu
 class Memory;
+class VGA;
 
 struct _RECT
 {
@@ -74,6 +75,9 @@ public:
 	_RECT pixelGR;
 
 	int LoResCache[24][40];
+	// text cells already drawn: glyph | 0x100 when drawn inverse, -1 = dirty.
+	// TEXT had no cache, so every frame redrew all 960 cells (53,760 pixels).
+	int TextCache[24][40];
 	int HiResCache[192][40];
 	BYTE previousBit[192][40];
 	BYTE flashCycle;
@@ -81,7 +85,9 @@ public:
 
 private:
 	CPU* cpu;
-	AppleColor* backbuffer;	// Render Backbuffer
+	// Set for the duration of Render(); the drawing helpers below write
+	// straight into the VGA framebuffer, so there is no backbuffer.
+	VGA* vga;
 	//Texture2D renderTexture;
 	//Image renderImage;
 
@@ -124,6 +130,7 @@ private:
 	void UpdateGamepad();
 
 	void ClearScreen();
+	void RenderFpsOverlay();
 	void DrawPoint(int x, int y, int r, int g, int b);
 	void DrawRect(_RECT rect, int r, int g, int b);
 	int GetScreenMode();
@@ -140,13 +147,20 @@ public:
 
 	// Supervisor menu support
 	bool supervisorRequested;
+
+	// F2 FPS overlay: toggled from the keyboard, value fed in by the main loop
+	bool fpsOverlay;
+	int  fpsValue;
 	bool Mount(const char* path, int drive);
 	void Unmount(int drive);
 	void InvalidateRenderCache();
+	// marks only the cells under the FPS overlay dirty, so the emulator
+	// repaints them instead of trusting a cache the overlay has scribbled on
+	void InvalidateFpsOverlayRegion();
 
 	BYTE SoftSwitch(Memory* mem, WORD address, BYTE value, bool WRT);
 	void PlaySound();
-	void Render( Memory& mem, int frame);
+	void Render( Memory& mem, int frame, VGA* vga);
 
 	void UpdateInput();
 
@@ -156,7 +170,7 @@ public:
 	bool GetDiskMotorState();
 	std::string GetDiskName(int i);
 
-	AppleColor *getBackBuffer();
+
 };
 
 

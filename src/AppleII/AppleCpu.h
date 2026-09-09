@@ -304,6 +304,10 @@ public:
 	// for debug
 	BYTE lastInst;
 	bool enableLog;
+
+	// Skip the DOS 3.3 RWTS drive spin-up wait (see CPU::Run). Emulated
+	// drives are always up to speed, so the wait is pure wasted time.
+	bool fastDiskDelay;
 	//std::string GetInstName(BYTE opcode);
 
 public:

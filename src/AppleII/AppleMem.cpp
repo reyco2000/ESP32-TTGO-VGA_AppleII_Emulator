@@ -5,6 +5,7 @@
 
 #include "AppleMem.h"
 #include "../Tools/Log.h"
+#include <esp_heap_caps.h>
 
 Memory::Memory()
 {
@@ -17,13 +18,41 @@ Memory::~Memory()
 	Destroy();
 }
 
+// The 6502 core hits these blocks on nearly every emulated cycle, so they must
+// live in internal SRAM. PSRAM is on a 40MHz SPI bus and the 32K data cache
+// cannot hold a 76K working set, so a PSRAM-backed address space stalls the
+// interpreter on almost every access.
+//
+// Plain malloc() is not enough: the Arduino ESP32 core builds with
+// CONFIG_SPIRAM_USE_MALLOC, so allocations above the always-internal threshold
+// may be served from PSRAM. Ask for MALLOC_CAP_INTERNAL explicitly.
+static BYTE* AllocFast(const char* name, size_t size)
+{
+	BYTE* p = (BYTE*)heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+	if (p)
+	{
+		Serial.printf("[mem] %-4s %6u bytes @ %p (internal)\n", name, (unsigned)size, p);
+		return p;
+	}
+
+	// Not enough internal RAM left - fall back so we degrade in speed, not function.
+	p = (BYTE*)ps_malloc(size);
+	Serial.printf("[mem] %-4s %6u bytes @ %p (PSRAM FALLBACK - slow)\n", name, (unsigned)size, p);
+	return p;
+}
+
 void Memory::Create()
 {
-	ram = (BYTE*)ps_malloc(RAMSIZE);  // 48K of ram in $000-$BFFF
-	rom = (BYTE*)ps_malloc(ROMSIZE);  // 12K of rom in $D000-$FFFF
-	lgc = (BYTE*)ps_malloc(LGCSIZE);
-	bk2 = (BYTE*)ps_malloc(BK2SIZE);
-	sl6 = (BYTE*)ps_malloc(SL6SIZE);
+	// Allocated hottest-first so that if internal RAM runs short, the least
+	// frequently accessed blocks are the ones pushed out to PSRAM.
+	ram = AllocFast("ram", RAMSIZE);  // 48K of ram in $000-$BFFF
+	rom = AllocFast("rom", ROMSIZE);  // 12K of rom in $D000-$FFFF
+	lgc = AllocFast("lgc", LGCSIZE);
+	bk2 = AllocFast("bk2", BK2SIZE);
+	sl6 = AllocFast("sl6", SL6SIZE);
+
+	Serial.printf("[mem] internal free after alloc: %u bytes\n",
+	              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 
 	Reset();
 }

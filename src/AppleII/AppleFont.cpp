@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include "AppleFont.h"
 #include "Apple2Device.h"
+#include "../VGA/VGA.h"
 #include "../Tools/Log.h"
 
 
@@ -211,32 +212,32 @@ void AppleFont::Create()
 
 }
 
-void AppleFont::RenderFont(AppleColor* backbuffer, int fontnum, int posx, int posy, bool inv)
+void AppleFont::RenderFont(VGA* vga, int fontnum, int posx, int posy, bool inv)
 {
+	if (vga == NULL)
+		return;
+
+	const unsigned char* glyph = inv ? invfont[fontnum] : font[fontnum];
+	const int on  = vga->rgb(0, 0xFF, 0);
+	const int off = vga->rgb(0, 0, 0);
+
 	int pos = 0;
-	for(int y=0; y<FONT_Y; y++)
+	for (int y = 0; y < FONT_Y; y++)
+	{
+		// one scanline lookup per glyph row rather than per pixel
+		unsigned char* scanline = vga->row(posy + y);
+		if (scanline == NULL)
+		{
+			pos += FONT_X;
+			continue;
+		}
+
 		for (int x = 0; x < FONT_X; x++)
 		{
-			unsigned char c = inv ? invfont[fontnum][pos++] : font[fontnum][pos++];
-			if (c == 1)
-			{
-				if(backbuffer == NULL)
-				{
-//					DrawPixel(posx + x, posy + y, GREEN);
-				}
-				else
-					backbuffer[((posy+y)*SCREENSIZE_X) + (posx + x)] = AppleColor(0, 0XFF, 0 );
-			}
-			else
-			{
-				if (backbuffer == NULL)
-				{
-//					DrawPixel(posx + x, posy + y, BLACK);
-				}
-				else
-					backbuffer[((posy + y) * SCREENSIZE_X) + (posx + x)] = AppleColor(0, 0, 0 );
-			}
+			int t = (posx + x) ^ 2;                  // VGA byte order swizzle
+			scanline[t] = (scanline[t] & 0xC0) | (glyph[pos++] == 1 ? on : off);
 		}
+	}
 }
 
 /*

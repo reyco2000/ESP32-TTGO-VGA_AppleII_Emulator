@@ -37,10 +37,11 @@ private:
 	enum Mode { BROWSE, PICK_DRIVE };
 
 	Apple2Machine* machine;
-	AppleColor* backbuffer;
 	AppleFont font;
+	VGA* vga;                    // valid only for the duration of Render()
 
 	bool active;
+	bool dirty;                  // menu needs repainting (set on every keypress)
 	Mode mode;
 
 	char curPath[SUP_PATH_LEN];
