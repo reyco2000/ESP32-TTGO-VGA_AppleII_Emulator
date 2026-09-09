@@ -159,6 +159,8 @@ void loop()
     {
         fpsMillis = millis();
         Serial.printf("FPS : %d\n", fpscount);
+        // feeds the F2 on-screen counter (drawn by Apple2Device::Render)
+        machine->device.fpsValue = fpscount;
         fpscount = 0;
     }
 }

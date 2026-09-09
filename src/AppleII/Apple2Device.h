@@ -130,6 +130,7 @@ private:
 	void UpdateGamepad();
 
 	void ClearScreen();
+	void RenderFpsOverlay();
 	void DrawPoint(int x, int y, int r, int g, int b);
 	void DrawRect(_RECT rect, int r, int g, int b);
 	int GetScreenMode();
@@ -146,9 +147,16 @@ public:
 
 	// Supervisor menu support
 	bool supervisorRequested;
+
+	// F2 FPS overlay: toggled from the keyboard, value fed in by the main loop
+	bool fpsOverlay;
+	int  fpsValue;
 	bool Mount(const char* path, int drive);
 	void Unmount(int drive);
 	void InvalidateRenderCache();
+	// marks only the cells under the FPS overlay dirty, so the emulator
+	// repaints them instead of trusting a cache the overlay has scribbled on
+	void InvalidateFpsOverlayRegion();
 
 	BYTE SoftSwitch(Memory* mem, WORD address, BYTE value, bool WRT);
 	void PlaySound();

@@ -63,6 +63,10 @@ Apple2Device::Apple2Device()
 {
 	DEBUG_PRINTLN("Construct Apple2Device");
 	vga = NULL;
+	// host-side overlay state: deliberately not in Reset(), an emulated
+	// machine reset must not switch the user's FPS display off
+	fpsOverlay = false;
+	fpsValue = 0;
 	Reset();
 }
 
@@ -479,11 +483,54 @@ int Apple2Device::GetScreenMode()
 	HIRES : 280×192 (MIX 280×160)
 	MIX일경우에 하단은 TEXT( 4Line : 32 pixel )
 */
+// F2 FPS overlay: 7 text cells in the top right corner ("999 FPS").
+// FPS_COL is where the glyphs go; hires caches at a 2-byte (14 pixel)
+// granularity, so the invalidated span starts one byte column earlier.
+#define FPS_COL			33
+#define FPS_LEN			7
+#define FPS_HIRES_COL	32
+
+void Apple2Device::InvalidateFpsOverlayRegion()
+{
+	for (int col = FPS_HIRES_COL; col < SCREENTEXT_X; col++)
+	{
+		if (col >= FPS_COL)
+		{
+			TextCache[0][col] = -1;
+			LoResCache[0][col] = -1;
+		}
+		for (int line = 0; line < FONT_Y; line++)
+		{
+			HiResCache[line][col] = -1;
+			previousBit[line][col] = 0;
+		}
+	}
+}
+
+void Apple2Device::RenderFpsOverlay()
+{
+	char text[FPS_LEN + 1];
+	int fps = fpsValue;
+	if (fps < 0)   fps = 0;
+	if (fps > 999) fps = 999;
+	snprintf(text, sizeof(text), "%3d FPS", fps);
+
+	// normal video; RenderFont paints the whole 7x8 cell, so the black
+	// background still covers whatever the emulator drew underneath
+	for (int i = 0; i < FPS_LEN; i++)
+		font.RenderFont(vga, (BYTE)text[i], (FPS_COL + i) * FONT_X, 0, false);
+}
+
 void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 {
 	vga = vgaOut;
 	if (vga == NULL)
 		return;
+
+	// the overlay scribbles over cells the caches believe are up to date,
+	// so give them back to the emulator before it paints this frame
+	if (fpsOverlay)
+		InvalidateFpsOverlayRegion();
 
 	int screenmode = GetScreenMode();
 
@@ -647,6 +694,10 @@ void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 	rec.height = (float)(SCREENSIZE_Y * zoomscale + (gap * 2));
 	DrawRectangleLinesEx(rec, 2, GRAY);
 */
+	// drawn last: the overlay sits on top of the emulated screen
+	if (fpsOverlay)
+		RenderFpsOverlay();
+
 	if (++flashCycle == 30)
 		flashCycle = 0;
 
@@ -797,6 +848,13 @@ void Apple2Device::UpdateKeyBoard()
             if (vk == fabgl::VK_F1)
             {
                 supervisorRequested = true;
+                return;
+            }
+            if (vk == fabgl::VK_F2)
+            {
+                fpsOverlay = !fpsOverlay;
+                // repaint what the overlay covered (or is about to cover)
+                InvalidateFpsOverlayRegion();
                 return;
             }
             char ascii = keyboard_ptr->virtualKeyToASCII(vk);
