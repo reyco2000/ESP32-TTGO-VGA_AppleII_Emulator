@@ -8,7 +8,7 @@ An Apple II emulator that runs on ESP32 hardware, rendering to VGA output via th
 
 ## Build commands
 
-Built with arduino-cli (PlatformIO's `platformio.ini` is legacy config; `pio` is not installed). Entry point `ESP32-VGA_AppleII_Emulator.ino`, sources under `src/` per Arduino sketch layout.
+Built with arduino-cli; `pio` is not installed and there is no PlatformIO config in the repo. Entry point `ESP32-VGA_AppleII_Emulator.ino`, sources under `src/` per Arduino sketch layout.
 
 ```bash
 arduino-cli compile --fqbn "esp32:esp32:esp32:PSRAM=enabled,PartitionScheme=huge_app" .   # build
@@ -20,7 +20,7 @@ Requires arduino-cli core `esp32:esp32` 2.0.x and the FabGL 1.0.9 user library.
 
 ### Targeting different hardware
 
-The build targets a plain ESP32 (TTGO VGA32-class board) via the FQBN in the build command; adjust FQBN board options (PSRAM, PartitionScheme) for other ESP32 variants. The `platformio.ini` and `boards/*.json` files are legacy PlatformIO configuration and are not used by the arduino-cli build.
+The build targets a plain ESP32 (TTGO VGA32-class board) via the FQBN in the build command; adjust FQBN board options (PSRAM, PartitionScheme) for other ESP32 variants. The `boards/*.json` files are leftover PlatformIO board definitions and are not used by the arduino-cli build. `platformio.ini` is no longer tracked (it is git-ignored, so a local copy may still be on disk).
 
 ## Architecture
 

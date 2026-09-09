@@ -2,3 +2,5 @@
 .superpowers/
 .claude/
 graphify-out/
+platformio.ini
+test/README
