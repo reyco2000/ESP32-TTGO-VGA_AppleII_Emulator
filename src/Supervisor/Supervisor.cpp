@@ -1,3 +1,21 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : Supervisor.cpp
+ *  Module : F1 supervisor menu. Pauses emulation, browses the SD
+ *           card and mounts/unmounts .nib images into either drive
+ *           via Apple2Machine. Paints directly into the live VGA
+ *           framebuffer, repainting only when the dirty flag is
+ *           set, and invalidates the emulator's render caches on
+ *           close.
+ * ============================================================
+*/
+
 #include <Arduino.h>
 #include <SD.h>
 #include "fabgl.h"

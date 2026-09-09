@@ -1,3 +1,20 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : AppleCpu.cpp
+ *  Module : MOS 6502 CPU emulator. Instruction-level interpreter
+ *           for the full instruction set; every memory access is
+ *           routed through Memory. Also implements fastDiskDelay,
+ *           which skips the DOS 3.3 RWTS drive spin-up wait loop
+ *           at $BD9E after verifying its opcode signature.
+ * ============================================================
+*/
+
 
 /*
 	MOS 6502 CPU Emulator

@@ -1,3 +1,18 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : AppleMem.h
+ *  Module : Apple II memory subsystem (interface). Block pointers,
+ *           Language Card bank-switching flags and the
+ *           ReadByte/WriteByte entry points.
+ * ============================================================
+*/
+
 #ifndef MEMORY_H
 #define MEMORY_H
 

@@ -1,3 +1,21 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : Apple2Device.cpp
+ *  Module : Apple II peripherals and video. Two Disk II drives
+ *           backed by nibblized .nib images read from SD, PS/2
+ *           keyboard and gamepad input, soft-switch handling, and
+ *           text/lores/hires rendering written straight into the
+ *           VGA framebuffer with per-cell dirty caches. Also draws
+ *           the F2 FPS overlay.
+ * ============================================================
+*/
+
 
 #include "Predef.h"
 #include "AppleCpu.h"

@@ -1,3 +1,20 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : VGA.h
+ *  Module : Hardware seam between the emulator and FabGL. Thin
+ *           wrapper over the global fabgl::VGAController:
+ *           dot()/row()/clear() pack RGB222 values straight into
+ *           VGA scanline buffers, preserving the two sync bits in
+ *           each byte and applying the required x^2 byte swizzle.
+ * ============================================================
+*/
+
 #ifndef VGA_H
 #define VGA_H
 

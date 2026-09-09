@@ -1,3 +1,20 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : ESP32-VGA_AppleII_Emulator.ino
+ *  Module : Arduino sketch entry point. setup() brings up PSRAM,
+ *           the SD card, FabGL's VGA DisplayController and the
+ *           PS/2 keyboard, then constructs Apple2Machine, VGA and
+ *           Supervisor. loop() runs one video frame's worth of
+ *           6502 cycles, renders and presents.
+ * ============================================================
+*/
+
 #include <Arduino.h>
 #include <SPI.h>
 #include <SD.h>

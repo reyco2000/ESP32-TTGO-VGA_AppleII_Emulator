@@ -1,4 +1,21 @@
 /*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : Log.h
+ *  Module : Serial debug logging macros (DEBUG_PRINT /
+ *           DEBUG_PRINTLN), compiled out when debug output is
+ *           disabled. Third-party file: originally by bitluni,
+ *           licensed CC BY-SA 4.0 (see the notice below) - not
+ *           MIT.
+ * ============================================================
+*/
+
+/*
 	Author: bitluni 2019
 	License: 
 	Creative Commons Attribution ShareAlike 4.0

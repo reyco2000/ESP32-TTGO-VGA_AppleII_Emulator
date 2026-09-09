@@ -1,3 +1,21 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : rombios.h
+ *  Module : Embedded ROM images - the Apple II+ system ROM
+ *           (appleIIrom) and the Disk II slot-6 boot PROM (diskII)
+ *           - memcpy'd into Memory at boot. Data only, no code.
+ *           NOTE: these ROM contents remain the property of their
+ *           original copyright holders and are not covered by the
+ *           MIT license above.
+ * ============================================================
+*/
+
 #ifndef ROMBIOS_H
 #define ROMBIOS_H
 

@@ -1,3 +1,18 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : AppleCpu.h
+ *  Module : MOS 6502 CPU emulator (interface). Register file,
+ *           status flags, addressing-mode helpers and the opcode
+ *           dispatch declarations.
+ * ============================================================
+*/
+
 #ifndef CPU_H
 #define CPU_H
 
