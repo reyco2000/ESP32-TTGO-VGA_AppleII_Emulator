@@ -8,3 +8,5 @@ build/
 .vscode/
 CLAUDE.md
 docs/superpowers/
+lib/
+include/
