@@ -2,6 +2,27 @@
 
 An Apple II+ emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.nib` floppy disk images are loaded from an SD card — no host computer involved.
 
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src="pictures/boot-basic.jpg" width="400" alt="Apple ][ BASIC prompt"><br><sub>Cold start with no disk mounted — straight to the Apple ][ prompt.</sub></td>
+<td width="50%"><img src="pictures/supervisor-browser.jpg" width="400" alt="Supervisor SD card browser"><br><sub><b>F1</b> supervisor: the SD card browser, with both drives empty.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="pictures/supervisor-mounted.jpg" width="400" alt="Disk image mounted to Drive 1"><br><sub>Pressing <b>1</b> mounts the selected <code>.nib</code> into Drive 1 — no reset, so mid-game swaps work.</sub></td>
+<td width="50%"><img src="pictures/karateka-title.jpg" width="400" alt="Karateka title screen"><br><sub><i>Karateka</i> title screen — hires mode.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="pictures/karateka-cutscene.jpg" width="400" alt="Karateka cutscene"><br><sub><i>Karateka</i> cutscene.</sub></td>
+<td width="50%"><img src="pictures/karateka-gameplay.jpg" width="400" alt="Karateka gameplay"><br><sub><i>Karateka</i> in play.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="pictures/donkeykong-title.jpg" width="400" alt="Donkey Kong title screen"><br><sub><i>Donkey Kong</i> title screen.</sub></td>
+<td width="50%"><img src="pictures/donkeykong-gameplay.jpg" width="400" alt="Donkey Kong first board"><br><sub><i>Donkey Kong</i>, first board.</sub></td>
+</tr>
+</table>
+
 ## Features
 
 - MOS 6502 CPU emulation (full instruction set)
