@@ -12,10 +12,14 @@ An Apple II+ emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class bo
 - **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
 - Boots to BASIC with no disk mounted; the Disk II boot PROM at `$C600` is managed automatically as disks are mounted/unmounted so `PR#6` always behaves correctly
 
-## Hardware
+## Hardware Requirements
 
-- ESP32 board with VGA resistor DAC and PS/2 keyboard port (e.g., LilyGO TTGO VGA32 v1.4)
-- SD card (SPI: SCK 14, MISO 2, MOSI 12, CS 13) with `.nib` disk images (sample images in `data/`)
+- **[LilyGo TTGO VGA32 v1.4](https://lilygo.cc/en-us/products/fabgl-vga32?_pos=1&_sid=4c095f59b&_ss=r)** (ESP32-WROVER-E, 4 MB PSRAM, 4 MB flash)
+- **VGA monitor** capable of 640×480 @ 60 Hz (most VGA CRTs and adapters; some modern LCDs accept this mode, others won't sync)
+- **PS/2 keyboard** plugged into the board's mini-DIN PS/2 jack
+- **MicroSD card** (FAT32 formatted) inserted in the on-board socket
+- **3.5 mm audio output** (mono) on the board's jack
+- **5 V USB-C** for power and serial programming
 
 ## Build & Flash
 
@@ -73,6 +77,8 @@ The Apple II+ system ROM and the Disk II boot PROM are **built into the firmware
 1. Format the card as FAT32
 2. Copy `.nib` disk images onto it — either in the root or in subdirectories, the F1 browser walks both. Sample images are in [`data/`](data/)
 3. Insert the card before powering on
+
+The card is driven over SPI on the VGA32's on-board socket — SCK 14, MISO 2, MOSI 12, CS 13 — which matters only if you are adapting the firmware to a different board.
 
 `.nib` (nibblized) is the only supported image format; `.dsk` and `.po` images need to be converted first. With no card or no disk mounted the machine still boots straight to BASIC.
 
