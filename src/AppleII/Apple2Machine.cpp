@@ -47,7 +47,7 @@ void Apple2Machine::InitMachine()
 	//UploadRom();	
 }
 
-// 롬을 내장
+// Embed the ROM
 bool Apple2Machine::Booting()
 {
 	DEBUG_PRINTLN("====> BOOTING ...");
@@ -67,7 +67,7 @@ bool Apple2Machine::Booting()
 	return true;
 }
 
-// 롬을 파일에서 로딩
+// Load the ROM from a file
 bool Apple2Machine::UploadRom()
 {
 	bool ret = false;
@@ -169,12 +169,12 @@ void Apple2Machine::Render(VGA *vga, int frame)
 }
 
 
-// DUMP파일을 로드하여 재개
+// Load a DUMP file and resume
 void Apple2Machine::LoadMachine(std::string path)
 {
 }
 
-// 현재의 모든 상태를 저장
+// Save the entire current state
 void Apple2Machine::DumpMachine(std::string path)
 {
 }

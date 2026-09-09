@@ -499,7 +499,7 @@ int Apple2Device::GetScreenMode()
 	TEXT 40x24 ( 7x8 Font )
 	LORES : 40x24 (MIX 40x20)
 	HIRES : 280×192 (MIX 280×160)
-	MIX일경우에 하단은 TEXT( 4Line : 32 pixel )
+	In MIX mode the bottom is TEXT ( 4 Line : 32 pixel )
 */
 // F2 FPS overlay: 7 text cells in the top right corner ("999 FPS").
 // FPS_COL is where the glyphs go; hires caches at a 2-byte (14 pixel)
@@ -552,12 +552,12 @@ void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 
 	int screenmode = GetScreenMode();
 
-	// video Page에 따라 Address가 달라짐
+	// The address changes with the video page
 	// $400, $800, $2000, $4000
 	if (screenmode == LORES_MODE || screenmode == HIRES_MODE || 
 		screenmode == LORES_MIX_MODE || screenmode == HIRES_MIX_MODE)
 	{
-		// LoRes 저해상도
+		// LoRes, low resolution
 		if (hires_Mode == false)
 		{
 			videoAddress = videoPage * 0x0400;
@@ -568,7 +568,7 @@ void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 			for (int col = 0; col < 40; col++) 
 			{
 				pixelGR.x = col * 7;
-				// Mixmode이면 하단 4라인은 Text용
+				// In mix mode the bottom 4 lines are for text
 				for (int line = 0; line < (mixedMode ? 20 : 24); line++) 
 				{
 					pixelGR.y = line * 8;                                                 // first block
@@ -592,14 +592,14 @@ void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 		}
 		else
 		{
-			// highRes 고해상도
+			// highRes, high resolution
 			WORD word;
 			BYTE bits[16], bit, pbit, colorSet, even;
 			// PAGE is 1 or 2
 			videoAddress = videoPage * 0x2000;
 			BYTE colorIdx = 0;
 
-			// Mixmode이면 하단 4라인은 Text용
+			// In mix mode the bottom 4 lines are for text
 			for (int line = 0; line < (mixedMode ? 160 : 192); line++)
 			{
 				// for every 7 horizontal dots
@@ -648,7 +648,7 @@ void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 		}
 	}
 
-	// TEXT는 TEXT Only 그리고 Mixed에 모두 출력되어야 함
+	// TEXT has to be drawn in both TEXT-only and Mixed modes
 	if (screenmode == TEXT_MODE || screenmode == LORES_MIX_MODE || screenmode == HIRES_MIX_MODE)
 	{
 // 		if(screenmode == TEXT_MODE)
@@ -657,7 +657,7 @@ void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 		videoAddress = videoPage * 0x0400;
 
 		// Text or Mixed
-		// Font 크기 7X8 / 40x20 글자
+		// Font size 7X8 / 40x20 characters
 		int linelimit = textMode ? 0 : 20;
 
 		for (int col = 0; col < SCREENTEXT_X; col++)
@@ -738,8 +738,8 @@ bool Apple2Device::InsertFloppy(const char* filename, int drv)
 	Serial.printf("Read Floppy OK : %s\n",filename);
 	sprintf(disk[drv].filename, "%s", filename);
 
-	// 일단 쓰기 불가 모드로 진행
-	disk[drv].readOnly = false;	// 읽기만 가능
+	// For now, proceed in write-disabled mode
+	disk[drv].readOnly = false;	// read only
 	return true;
 }
 
@@ -815,10 +815,10 @@ void Apple2Device::UpdateInput()
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
 
-// 플로피 디스크 업데이트
+// Floppy disk update
 bool Apple2Device::UpdateFloppyDisk()
 {
-	// Floppy motor가 off이거나 updatedrive이 0이되면 끝
+	// Done once the floppy motor is off or updatedrive reaches 0
 	if (disk[currentDrive].motorOn && ++updatedrive)
 		return true;
 	else
@@ -853,7 +853,7 @@ void Apple2Device::PlaySound()
 	digitalWrite(26, sound_state ? HIGH : LOW);
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////// 키보드
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////// Keyboard
 
 void Apple2Device::UpdateKeyBoard()
 {

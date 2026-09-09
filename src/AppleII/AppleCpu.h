@@ -33,8 +33,8 @@ class Memory;
 
 /*
 	https://www.cs.jhu.edu/~phi/csf/slides/lecture-6502-stack.pdf
-	6502 Stack은 0x01FF, 0x01FE, 0x01FD --> 0x0100로 Push 된다
-	Stack은 총 256 Byte
+	The 6502 stack pushes downward: 0x01FF, 0x01FE, 0x01FD --> 0x0100
+	The stack is 256 bytes in total
 */
 #define STACK_ADDRESS	0x0100
 #define STACK_POS		0xFD
@@ -63,7 +63,7 @@ BYTE N : 1; //7: Negative
 
 // Instruction
 /*
-	구현된것들은 () 처리
+	The implemented ones are marked with ()
 	(AND) (EOR) (ORA) (BIT)
 	(JMP) (JSR) (RTS)
 	(NOP)
@@ -370,11 +370,11 @@ public:
 	WORD addr_mode_ABS(Memory& mem, long long& cycle);
 	// ABS + X
 	WORD addr_mode_ABSX(Memory& mem, long long& cycle);
-	// ABS + X : Page 넘어가는것 무시
+	// ABS + X : page crossing ignored
 	WORD addr_mode_ABSX_NoPage(Memory& mem, long long& cycle);
 	// ABS + Y
 	WORD addr_mode_ABSY(Memory& mem, long long& cycle);
-	// ABS + Y : Page 넘어가는것 무시
+	// ABS + Y : page crossing ignored
 	WORD addr_mode_ABSY_NoPage(Memory& mem, long long& cycle);
 
 	// Indexed indirect X

@@ -62,7 +62,7 @@ struct FloppyDrive
 };
 
 
-// apple2의 cpu / memory제외한 device
+// Apple II devices - everything except the CPU and memory
 class Apple2Device
 {
 public:
@@ -76,7 +76,7 @@ public:
 
 	//////////////////////////////////////////////////////////////////////////
 
-	// 현재 플로피 디스크 (1,2)
+	// Current floppy disks (1,2)
 	int	currentDrive;
 
 	//////////////////////////////////////////////////////////////////////////
@@ -108,7 +108,7 @@ private:
 
 	AppleFont font;
 
-	// 키보드입력 값
+	// Keyboard input value
 	BYTE keyboard;
 
 	////////////////////////////////////////////////

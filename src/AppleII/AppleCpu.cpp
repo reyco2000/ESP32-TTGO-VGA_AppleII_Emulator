@@ -106,7 +106,7 @@ void CPU::Reset(Memory &mem)
 	//PS = 0;				// processor status (flags)
 	_PS = (_PS | FLAG_INTERRUPT_DISABLE) & ~FLAG_DECIMAL_MODE;
 	SP = STACK_POS;	// Stack pointer
-	// ROM 로드후 정해짐
+	// Decided after the ROM is loaded
 	PC = mem.ReadByte(0xFFFC) | (mem.ReadByte(0xFFFD) << 8);
 	tick = 0;
 }
@@ -198,10 +198,10 @@ void CPU::SetCarryFlagNegative(WORD value)
 
 void CPU::SetOverflow(BYTE oldv0, BYTE v0, BYTE v1)
 {
-	bool sign0 = !((oldv0 ^ v1) & FLAG_NEGATIVE);	// 계산전 부호
-	bool sign1 = ((v0 ^ v1) & FLAG_NEGATIVE);		// 계산후 부호
+	bool sign0 = !((oldv0 ^ v1) & FLAG_NEGATIVE);	// sign before the calculation
+	bool sign1 = ((v0 ^ v1) & FLAG_NEGATIVE);		// sign after the calculation
 
-	// Overflow는 같은 부호를 더했는데 다른 부호가 나오면 Overflow이다
+	// Overflow: two values of the same sign were added but the result has a different sign
 	//SetFlag(FLAG_OVERFLOW, (sign0 != sign1));
 	//Flag.V = (sign0 != sign1);
 	Flag.V = sign0 && sign1;
@@ -219,13 +219,13 @@ WORD CPU::FetchWord(Memory& mem, long long &cycle)
 	BYTE c0 = mem.ReadByte(PC++);
 	BYTE c1 = mem.ReadByte(PC++);
 
-	// 엔디안에 따라 c0 <--> c1해야 할수도 있다
+	// Depending on endianness, c0 and c1 may need to be swapped
 	WORD w = (c1 << 8) | c0;
 	cycle-=2;
 	return w;
 }
 
-// 메모리에서 읽는데 cycle소모 x / PC무관 할때 (Zero page같은것)
+// Reads memory without consuming a cycle, independent of PC (zero page and the like)
 BYTE CPU::ReadByte(Memory& mem, WORD addr, long long &cycle)
 {
 	BYTE c = mem.ReadByte(addr);
@@ -252,10 +252,10 @@ void CPU::WriteWord(Memory& mem, WORD value, int addr, long long &cycle)
 	cycle-=2;
 }
 
-// 이거를 써야하는 이유는 
+// Why this is needed:
 /*
-	SP는 1byte이고 Stack 메모리는 0x01FF -> 0x0100까지 256 Byte이므로
-	Address는 WORD이고 스택의 메모리 위치는 감소하기 때문에 이렇게 계산해햐함
+	SP is 1 byte, and stack memory runs 0x01FF -> 0x0100, so 256 bytes.
+	The address is a WORD and the stack grows downward, so it has to be computed this way.
 */
 WORD CPU::GetStackAddress()
 {
@@ -263,7 +263,7 @@ WORD CPU::GetStackAddress()
 	return sp;
 }
 
-// Byte를 Stack에 Push
+// Push a byte onto the stack
 void CPU::PushStackByte(Memory& mem, BYTE value, long long &cycle)
 {
 	WriteByte(mem, value, GetStackAddress(), cycle);
@@ -271,18 +271,18 @@ void CPU::PushStackByte(Memory& mem, BYTE value, long long &cycle)
 	cycle--;
 }
 
-// Word를 Stack에 Push
+// Push a word onto the stack
 void CPU::PushStackWord(Memory& mem, WORD value, long long &cycle)
 {
-	// Hi byte 먼저
+	// Hi byte first
 	WriteByte(mem, value >> 8, GetStackAddress(), cycle);
 	SP--;
-	// Lo byte 나중에
+	// Lo byte second
 	WriteByte(mem, value & 0xFF, GetStackAddress(), cycle);
 	SP--;
 }
 
-// 스택에서 1 byte POP
+// Pop 1 byte off the stack
 BYTE CPU::PopStackByte(Memory& mem, long long &cycle)
 {
  	SP++;
@@ -291,7 +291,7 @@ BYTE CPU::PopStackByte(Memory& mem, long long &cycle)
 	return popbyte;
 }
 
-// Stack에서 Word pop
+// Pop a word off the stack
 WORD CPU::PopStackWord(Memory& mem, long long &cycle)
 {
 	SP++;
@@ -341,7 +341,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 				continue;
 			}
 		}
-		// 여기에서 cycle 하나 소모
+		// One cycle is consumed here
 		BYTE inst = Fetch(mem, cycle);
 		lastInst = inst;
 
@@ -365,9 +365,9 @@ int CPU::Run(Memory &mem, long long _cycle)
 			case LDA_ZP: // 3 cycle
 			{
 				// $0000 to $00FF
-				// Zero page에서 읽어서 A로
+				// Read from zero page into A
 				WORD addr = addr_mode_ZP(mem, cycle);
-				// Zero page읽으면서 cycle 소모
+				// Reading zero page consumes a cycle
 				A = ReadByte(mem, addr, cycle);
 				SetZeroNegative(A);
 			}
@@ -375,22 +375,22 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case LDA_ZPX : // 4 cycle
 			{
-				// Zero page의 주소와 X 레지스터를 더한 주소에서 읽어 A로..
-				// X 레지스터에 $0F이고 LDA $80, X 이면 $80+$0F = $8F에서 A로 읽게됨
+				// Read into A from (zero page address + X register)
+				// With X = $0F, LDA $80,X reads into A from $80+$0F = $8F
 /*				
 				BYTE zpa = Fetch(mem, cycle);
 				zpa += X;
 				cycle--;
 */
 				WORD addr = addr_mode_ZPX(mem, cycle);
-				// Zero page읽으면서 cycle 소모
+				// Reading zero page consumes a cycle
 				A = ReadByte(mem, addr, cycle);
 
 				SetZeroNegative(A);
 			}
 			break;
 
-			// 절대 주소 지정을 사용하는 명령어는 대상 위치를 식별하기 위해 전체 16 비트 주소를 포함합니다.
+			// Instructions using absolute addressing carry a full 16-bit address to identify the target location.
 			case LDA_ABS: // 4 cycle
 			{
 				WORD addr = addr_mode_ABS(mem, cycle);
@@ -399,9 +399,9 @@ int CPU::Run(Memory &mem, long long _cycle)
 			}
 			break;
 
-			case LDA_ABSX:// 4 cycle / 페이지 넘어가면 1 cycle 추가
+			case LDA_ABSX:// 4 cycle / +1 cycle when a page boundary is crossed
 			{
-				// 메모리엑세스 페이지를 넘어가면 추가 사이클이 소요됨 (하드웨어가 그렇게 만들어짐?)
+				// Crossing a page boundary on a memory access costs an extra cycle (just how the hardware is built?)
 /*				
 				BYTE lo = Fetch(mem, cycle);
 				BYTE hi = Fetch(mem, cycle);
@@ -412,7 +412,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 */				
 // 				WORD addr = FetchWord(mem, cycle);
 // 				if ( (addr + X) - addr >= 0xFF )
-// 					cycle--;	// page 넘어감
+// 					cycle--;	// page boundary crossed
 
 				WORD addr = addr_mode_ABSX(mem, cycle);
 				A = ReadByte(mem, addr, cycle);
@@ -420,7 +420,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			}
 			break;
 
-			case LDA_ABSY:	// 4 cycle / 페이지 넘어가면 1 cycle 추가
+			case LDA_ABSY:	// 4 cycle / +1 cycle when a page boundary is crossed
 			{
 /*				
 				BYTE lo = Fetch(mem, cycle);
@@ -550,7 +550,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STA_ZP	:	// 3 cycle
 			{
-				// ZeroPage에 A레지스터 내용 쓰기
+				// Write the A register to zero page
 				WORD addr = addr_mode_ZP(mem, cycle);
 				WriteByte(mem, A, addr, cycle);
 			}
@@ -558,7 +558,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STA_ZPX :	// 4 cycle
 			{
-				// ZP + X에 A레지스터 내용쓰기
+				// Write the A register to ZP + X
 				WORD addr = addr_mode_ZPX(mem, cycle);
 				WriteByte(mem, A, addr, cycle);
 			}
@@ -566,7 +566,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STA_ABS:	// 4 cycle
 			{
-				// WORD address에 A레지스터 내용 쓰기
+				// Write the A register to a WORD address
 				WORD addr = addr_mode_ABS(mem, cycle);
 				WriteByte(mem, A, addr, cycle);
 			}
@@ -574,7 +574,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STA_ABSX:	// 5 cycle
 			{
-				// WORD address + X에 A레지스터 내용 쓰기
+				// Write the A register to WORD address + X
 				WORD addr = addr_mode_ABSX_NoPage(mem, cycle);
 				WriteByte(mem, A, addr, cycle);
 			}
@@ -582,7 +582,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STA_ABSY:	// 5 cycle
 			{
-				// WORD address + Y에 A레지스터 내용 쓰기
+				// Write the A register to WORD address + Y
 				WORD addr = addr_mode_ABSY_NoPage(mem, cycle);
 				WriteByte(mem, A, addr, cycle);
 			}
@@ -597,7 +597,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STA_INDY:	// 6 cycle
 			{
-				// ZeroPage에서 WORD address얻고 address + Y에 가르키는곳에 A레지스터 내용쓰기 
+				// Get a WORD address from zero page and write the A register to (address + Y)
 				BYTE zp = Fetch(mem, cycle);
 				WORD addr = ReadWord(mem, zp, cycle);
 				addr += Y;
@@ -610,7 +610,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STX_ZP	:	// 3 cycle
 			{
-				// ZeroPage에 X레지스터 내용 쓰기
+				// Write the X register to zero page
 				WORD addr = addr_mode_ZP(mem, cycle);
 				WriteByte(mem, X, addr, cycle);
 			}
@@ -618,7 +618,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STX_ZPY:	// 4 cycle
 			{
-				// ZP + Y에 X레지스터 내용쓰기
+				// Write the X register to ZP + Y
 				WORD addr = addr_mode_ZPY(mem, cycle);
 				WriteByte(mem, X, addr, cycle);
 			}
@@ -626,7 +626,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STX_ABS:	// 4 cycle
 			{
-				// WORD address에 X레지스터 내용 쓰기
+				// Write the X register to a WORD address
 				WORD addr = addr_mode_ABS(mem, cycle);
 				WriteByte(mem, X, addr, cycle);
 			}
@@ -636,7 +636,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STY_ZP:	// 3 cycle
 			{
-				// ZeroPage에 X레지스터 내용 쓰기
+				// Write the Y register to zero page
 				WORD addr = addr_mode_ZP(mem, cycle);
 				WriteByte(mem, Y, addr, cycle);
 
@@ -645,7 +645,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STY_ZPX:	// 4 cycle
 			{
-				// ZP + X에 Y레지스터 내용쓰기
+				// Write the Y register to ZP + X
 				WORD addr = addr_mode_ZPX(mem, cycle);
 				WriteByte(mem, Y, addr, cycle);
 			}
@@ -653,7 +653,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case STY_ABS:	// 4 cycle
 			{
-				// WORD address에 Y레지스터 내용 쓰기
+				// Write the Y register to a WORD address
 				WORD addr = addr_mode_ABS(mem, cycle);
 				WriteByte(mem, Y, addr, cycle);
 			}
@@ -668,7 +668,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 				// The JSR instruction pushes the address (minus one) of the return 
 				// point on to the stack and then sets the program counter to the target memory address.
 //   				WORD sr_addr = FetchWord(mem, cycle);
-// 				// 스택에 PC-1을 Push
+// 				// Push PC-1 onto the stack
 // 				PushStackWord(mem, PC - 1, cycle);
 // 				PC = sr_addr;
 // 				cycle--;
@@ -711,7 +711,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// Transfer (Stack Pointer) to X
 			case TSX :	// 2 cycle
 			{
-				// 스택포인터를 X 레지스터로
+				// Stack pointer -> X register
 				X = SP;
 				cycle--;
 				// Z / N flag
@@ -722,7 +722,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// Transfer X to (Stack Pointer)
 			case TXS :	// 2 cycle
 			{
-				// X레지스터를 SP로
+				// X register -> SP
 				SP = X;
 				cycle--;
 			}
@@ -731,7 +731,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// Pushes a copy of the accumulator on to the stack.
 			case PHA :	// 3 cycle
 			{
-				// A 레지스터를 스택에 Push
+				// Push the A register onto the stack
 				PushStackByte(mem, A, cycle);
 			}
 			break;
@@ -740,7 +740,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// The zero and negative flags are set as appropriate.
 			case PLA :	// 4 cycle
 			{
-				// 스택에서 8비트를 pull --> A로
+				// Pull 8 bits off the stack --> into A
 				A = PopStackByte(mem, cycle);
 				cycle--;
 				// Z / N flag
@@ -752,14 +752,14 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// The flags will take on new states as determined by the value pulled.
 			case PLP :	// 4 cycle
 			{
-				// pop 8 bit를 --> PS (Flag) : 플레그들은 Pop된 값에의하여 새로운 플레그 상태를 갖음
+				// pop 8 bit --> PS (Flag) : the flags take their new state from the popped value
 #if USEOLD
 				BYTE _PS = PopStackByte(mem, cycle);
 				cycle--;
 				_PS &= ~(FLAG_UNUSED | FLAG_BREAK);
 				PS = 0;
 				PS |= _PS;
-				// B , Unused는 사용하지 않음
+				// B and Unused are not used
 				Flag.B = 0;
 				Flag.Unused = 0;
 #else
@@ -773,7 +773,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// Pushes a copy of the status flags on to the stack.
 			case PHP :	// 3 cycle
 			{
-				// PS -> Stack에 Push
+				// PS -> Push onto the stack
 				BYTE __PS = _PS | FLAG_BREAK;
 				PushStackByte(mem, __PS, cycle);
 			}
@@ -812,7 +812,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			}
 			break;
 
-			case AND_ABSX:	// 4 cycle / 페이지 넘어가면 1 cycle 추가
+			case AND_ABSX:	// 4 cycle / +1 cycle when a page boundary is crossed
 			{
 				WORD addr = addr_mode_ABSX(mem, cycle);
 				A &= ReadByte(mem, addr, cycle);
@@ -820,7 +820,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			}
 			break;
 
-			case AND_ABSY:	// 4 cycle / 페이지 넘어가면 1 cycle 추가
+			case AND_ABSY:	// 4 cycle / +1 cycle when a page boundary is crossed
 			{
 				WORD addr = addr_mode_ABSY(mem, cycle);
 				A &= ReadByte(mem, addr, cycle);
@@ -837,7 +837,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			}
 			break;
 
-			case AND_INDY:	// 5 cycle / 페이지 넘어가면 1 cycle 추가
+			case AND_INDY:	// 5 cycle / +1 cycle when a page boundary is crossed
 			{
 				WORD addr = addr_mode_INDY(mem, cycle);
 				A &= ReadByte(mem, addr, cycle);
@@ -981,9 +981,9 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// Bit Test Zero page
 			case BIT_ZP:
 			{
-				// Zp에서 읽은 값과 A를 & 테스트 하고 플레그들을 셋팅 / Set if the result if the AND is zero
-				// N 플레그는 7bit, Set to bit 7 of the memory value
-				// V 플레그는 6Bit , Set to bit 6 of the memory value
+				// AND-test the value read from ZP against A and set the flags / Set if the result if the AND is zero
+				// The N flag is bit 7, Set to bit 7 of the memory value
+				// The V flag is bit 6, Set to bit 6 of the memory value
 				WORD addr = addr_mode_ZP(mem, cycle);
 				BYTE R = ReadByte(mem, addr, cycle);
 
@@ -995,8 +995,8 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			case BIT_ABS :
 			{
-				// Zp에서 읽은 값과 A를 & 테스트 하고 플레그들을 셋팅
-				// N 플레그는 7bit / V 플레그는 6Bit
+				// AND-test the value read from ZP against A and set the flags
+				// The N flag is bit 7 / the V flag is bit 6
 				WORD addr = addr_mode_ABS(mem, cycle);
 				BYTE R = ReadByte(mem, addr, cycle);
 
@@ -1437,7 +1437,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			case ASL : // 2 cycle
 			{
 				// A,Z,C,N = M*2 or M,Z,C,N = M*2
-				// Carry Bit 계산을 먼저해야한다. Shift할 값자체가 -(NEG)인 경우 왼쪽 shift는 Carry를 일으키기 때문
+				// The carry bit has to be computed first, because if the value being shifted is negative a left shift raises the carry
 				Execute_ASL(A, cycle);
 			}
 			break;
@@ -1556,7 +1556,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			break;
 			case ROL_ABSX:	// 7 cycle
 			{
-				// 여기는 ABS No page
+				// This one is ABS, no page crossing
 				WORD addr = addr_mode_ABSX_NoPage(mem, cycle);
 				BYTE v = ReadByte(mem, addr, cycle);
 				Execute_ROL(v, cycle);
@@ -1619,7 +1619,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 				BYTE offset = Fetch(mem, cycle);
 				if (!Flag.C)
 				{
-					// Page를 넘어가면 Cycle 증가
+					// Crossing a page boundary adds a cycle
 					BYTE lo = PC & 0x00FF;
 					WORD t = lo + (char)offset;
 					if (t > 0xFF) cycle--;
@@ -1633,7 +1633,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// Branch if Carry Set
 			// If the carry flag is set then add the relative displacement to the program 
 			// counter to cause a branch to a new location.
-			// BCC 반대
+			// The opposite of BCC
 			case BCS: // 2 ~ 4 cycle
 			{
 				Execute_BRANCH(Flag.C, true, mem, cycle);
@@ -1644,7 +1644,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 			// If the zero flag is set then add the relative displacement to the program counter 
 			// to cause a branch to a new location.
 			// 2 (+1 if branch succeeds +2 if to a new page)
-			case BEQ:	// 2 cycle + Zero이면 1 cycle추가 + Page넘어가면 1 cycle 추가
+			case BEQ:	// 2 cycle + 1 cycle if zero + 1 cycle if a page boundary is crossed
 			{
 				Execute_BRANCH(Flag.Z, true, mem, cycle);
 			}
@@ -1652,7 +1652,7 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			// If the zero flag is clear then add the relative displacement 
 			// to the program counter to cause a branch to a new location.
-			// BEQ랑 반대
+			// The opposite of BEQ
 			case BNE:
 			{
 				Execute_BRANCH(Flag.Z, false, mem, cycle);
@@ -1747,14 +1747,14 @@ int CPU::Run(Memory &mem, long long _cycle)
 
 			//////////////////////////////////////////////////////////////////////////////
 
-			// BRK 명령은 인터럽트 요청의 생성을 강제한다.
-			// 프로그램 카운터 및 프로세서 상태가 스택에서 푸시된 다음 $ FFFE/F의 IRQ 인터럽트 벡터가 
-			// PC에로드되고 상태의 중단 플래그가 1로 설정됩니다.
+			// The BRK instruction forces the generation of an interrupt request.
+			// The program counter and processor status are pushed on the stack, then the IRQ interrupt vector at $FFFE/F is
+			// loaded into the PC and the break flag in the status is set to 1.
 			case BRK :	// 7 cycle
 			{
 #if USEOLD
 				// PC Push
-				// BRK는 PC를 +1하지 않고 +2한다고 함. 그래서 PC+1 push
+				// BRK is said to advance the PC by 2 rather than 1, so PC+1 is pushed
 				// https://www.c64-wiki.com/wiki/BRK
 				PushStackWord(mem, PC+1, cycle);
 
@@ -1783,8 +1783,8 @@ int CPU::Run(Memory &mem, long long _cycle)
 			break;
 
 			// Return from Interrupt
-			// RTI 명령은 인터럽트 처리 루틴의 끝에서 사용됩니다.
-			// 프로그램 카운터 뒤에 오는 스택에서 프로세서 플래그를 가져옵니다.
+			// The RTI instruction is used at the end of an interrupt handler.
+			// It pulls the processor flags from the stack, followed by the program counter.
 			case RTI :	// 6 cycle
 			{
 				//BYTE PS = PopStackByte(mem, cycle);
@@ -1824,7 +1824,7 @@ void CPU::LoadToRegister(Memory& mem, long long &cycle, BYTE &reg)
 	SetZeroNegative(reg);
 }
 
-// ZP에 있는 값을 레지스터에 로드
+// Load the value at ZP into a register
 void CPU::LoadToRegisterFromZP(Memory& mem, long long &cycle, BYTE& reg)
 {
 	BYTE zpa = Fetch(mem, cycle);
@@ -1886,7 +1886,7 @@ WORD CPU::addr_mode_ABSX(Memory& mem, long long &cycle)
 
 }
 
-// ABS + X : Page 넘어가는것 무시(그냥 하드웨어가 이렇게 생김)
+// ABS + X : page crossing ignored (the hardware is simply built this way)
 WORD CPU::addr_mode_ABSX_NoPage(Memory& mem, long long &cycle)
 {
 	WORD address = FetchWord(mem, cycle);
@@ -1928,14 +1928,14 @@ WORD CPU::addr_mode_INDX(Memory& mem, long long &cycle)
 WORD CPU::addr_mode_INDY(Memory& mem, long long &cycle)
 {
 #if 1
-	// zero page에서 word 읽고 Y레지스터와 더한 주소의 1바이트를 A에 로드
-	// 읽을 주소가 page를 넘으면 1사이클 감소
+	// Read a word from zero page, add the Y register, and load the byte at that address into A
+	// If the address being read crosses a page, one cycle is deducted
 	BYTE addr = Fetch(mem, cycle);
 	BYTE lo = ReadByte(mem, addr, cycle);
 	BYTE hi = ReadByte(mem, addr + 1, cycle);
 
 	WORD t = lo + Y;
-	if (t > 0xFF) cycle--;	// page 넘어감
+	if (t > 0xFF) cycle--;	// page boundary crossed
 
 	WORD index_addr = ((hi << 8) | lo) + Y;
 	return index_addr;
@@ -1965,7 +1965,7 @@ void CPU::Execute_ADC(BYTE v)
 	SetCarryFlag(Result);
  	SetOverflow(oldA, A, v);
 #else
-	// Decimal mode 무시하면 Lode runner에서 점수 Hex로 나옴
+	// Ignoring decimal mode makes Lode Runner display its score in hex
 
 	WORD result = A + v + Flag.C;
 	Flag.V = ((result ^ A) & (result ^ v) & 0x0080) != 0;
@@ -2056,7 +2056,7 @@ void CPU::Execute_LSR(BYTE& v, long long &cycle)
 */
 void CPU::Execute_ROL(BYTE& v, long long &cycle)
 {
-	// 이전의 carry flag값을 Shift후의 0bit에 채워준다
+	// Fill bit 0 after the shift with the previous carry flag value
 	BYTE oldcarry = Flag.C ? 0x01 : 0x00;
 	Flag.C = (v & FLAG_NEGATIVE) > 0;
 	v <<= 1;
@@ -2074,10 +2074,10 @@ void CPU::Execute_ROL(BYTE& v, long long &cycle)
 */
 void CPU::Execute_ROR(BYTE& v, long long &cycle)
 {
-	// 최하비트가 1인가? -> 다음 캐리비트로 설정
+	// Is the lowest bit 1? -> it becomes the next carry bit
 	BYTE oldcarry = (v & FLAG_CARRY) > 0;
 	v = v >> 1;
-	// 이전 Carry가 1이면 NEGATIVE 채움
+	// If the previous carry was 1, fill in NEGATIVE
 	v |= (Flag.C ? FLAG_NEGATIVE : 0);
 	cycle--;
 	Flag.C = oldcarry;
@@ -2091,7 +2091,7 @@ void CPU::Execute_BRANCH(bool v, bool condition, Memory &mem, long long &cycle)
 	if (v == condition)
 	{
 #if !USEOLD
-		// Page를 넘어가면 Cycle 증가
+		// Crossing a page boundary adds a cycle
 		BYTE lo = PC & 0x00FF;
 		WORD t = lo + (SBYTE)offset;
 		if (t > 0xFF) cycle--;
