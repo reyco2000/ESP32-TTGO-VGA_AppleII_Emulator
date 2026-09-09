@@ -39,12 +39,35 @@ arduino-cli monitor -p /dev/ttyUSB0 -c 115200                                   
 
 Depending on the board's USB-serial chip the port may enumerate as `/dev/ttyACM0` instead of `/dev/ttyUSB0`; `arduino-cli board list` shows which one is present.
 
+### Release firmware
+
+To produce a single flashable image (bootloader + partition table + boot_app0 + app merged at offset `0x0`):
+
+```bash
+tools/build-firmware.sh          # output in build/, plus SHA256SUMS
+```
+
+Pre-built firmware is published on the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page. To flash it without a build toolchain:
+
+```bash
+esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
+  write_flash 0x0 ESP32-VGA_AppleII_Emulator.merged.bin
+```
+
+See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
+
 ## Usage
 
 - The machine powers on into BASIC/monitor with no disk.
 - Press **F1** to open the supervisor menu: arrow keys to move, **Enter** to open a directory or select a `.nib` (then `1`/`2` picks the drive), **ESC** to resume emulation.
 - Press **F2** to show or hide the on-screen FPS counter.
 - Use the menu's `[ RESET MACHINE ]` item (or `PR#6` from BASIC) to boot a mounted disk.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Note that the embedded Apple II ROM and disk image
+data (`src/AppleII/rombios.h`, `src/AppleII/LodeRunner.h`) and `src/Tools/Log.h`
+(CC BY-SA 4.0, by bitluni) are third-party components under their own terms.
 
 ## Credits
 

@@ -1,3 +1,20 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : AppleMem.cpp
+ *  Module : Apple II memory subsystem. Allocates the RAM / ROM /
+ *           slot-6 / Language Card blocks in internal SRAM (never
+ *           PSRAM), implements the segmented address map and
+ *           Language Card banking, and routes $C000-$C0FF I/O page
+ *           accesses to Apple2Device::SoftSwitch.
+ * ============================================================
+*/
+
 
 /*
 	MOS 6502 CPU Emulator

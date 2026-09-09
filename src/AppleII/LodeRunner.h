@@ -1,3 +1,21 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : LodeRunner.h
+ *  Module : Embedded nibblized disk image kept for reference and
+ *           bring-up testing. Currently orphaned - not referenced
+ *           by InsertFloppy or any other code path. NOTE: the disk
+ *           image contents remain the property of their original
+ *           copyright holders and are not covered by the MIT
+ *           license above.
+ * ============================================================
+*/
+
 /* D:\work\ESP32\Apple-II-Emulator-ESP32\data\LodeRunner.nib (2022-04-09 오후 9:57:11)
    StartOffset(h): 00000000, EndOffset(h): 00038DFF, 길이(h): 00038E00 */
 

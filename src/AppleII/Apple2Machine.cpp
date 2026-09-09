@@ -1,3 +1,19 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : Apple2Machine.cpp
+ *  Module : Top-level machine orchestrator. Creates and wires CPU
+ *           + Memory + Apple2Device, copies the embedded Apple II
+ *           and Disk II ROM images into memory at boot, and drives
+ *           the per-frame cycle budget.
+ * ============================================================
+*/
+
 #include "Predef.h"
 #include "rombios.h"
 #include "Apple2Machine.h"

@@ -1,3 +1,19 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : Predef.h
+ *  Module : Shared compile-time definitions: memory map constants
+ *           (RAMSIZE, ROMSTART, SL6START, Language Card regions),
+ *           screen and font geometry, disk image sizes and common
+ *           includes used across the emulation core.
+ * ============================================================
+*/
+
 #ifndef PREDEF_H
 #define PREDEF_H
 
