@@ -114,3 +114,7 @@ Think of it as a chance to mentor an AI-assisted developer through code review. 
 ## TODO
 
 - [ ] Improve FPS
+- [ ] Test keyboard bouncing — check the PS/2 input path for repeated or dropped keystrokes and debounce if needed
+- [ ] CPU speed control — the main loop runs a fixed `17050 * 4` cycles per frame; make this selectable so the machine can run at 1 MHz or faster
+- [ ] 80 column support
+- [ ] Apple IIe support — IIe ROM, auxiliary memory bank, and the extra soft switches
