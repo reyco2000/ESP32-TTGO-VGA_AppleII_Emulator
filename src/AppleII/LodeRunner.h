@@ -16,8 +16,8 @@
  * ============================================================
 */
 
-/* D:\work\ESP32\Apple-II-Emulator-ESP32\data\LodeRunner.nib (2022-04-09 오후 9:57:11)
-   StartOffset(h): 00000000, EndOffset(h): 00038DFF, 길이(h): 00038E00 */
+/* D:\work\ESP32\Apple-II-Emulator-ESP32\data\LodeRunner.nib (2022-04-09 9:57:11 PM)
+   StartOffset(h): 00000000, EndOffset(h): 00038DFF, Length(h): 00038E00 */
 
 unsigned char rawData[232960] = {
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
