@@ -6,3 +6,4 @@ platformio.ini
 test/README
 build/
 .vscode/
+CLAUDE.md
