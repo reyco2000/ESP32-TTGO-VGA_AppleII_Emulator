@@ -47,11 +47,14 @@ To produce a single flashable image (bootloader + partition table + boot_app0 + 
 tools/build-firmware.sh          # output in build/, plus SHA256SUMS
 ```
 
+The image is named after `FW_VERSION` in that script — currently
+`ESP32-AppleII-v0.2.0.bin`.
+
 Pre-built firmware is published on the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page. To flash it without a build toolchain:
 
 ```bash
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-VGA_AppleII_Emulator.merged.bin
+  write_flash 0x0 ESP32-AppleII-v0.2.0.bin
 ```
 
 See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.

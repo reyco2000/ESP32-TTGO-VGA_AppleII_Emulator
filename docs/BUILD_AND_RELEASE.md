@@ -34,16 +34,31 @@ file, drops the `.elf`/`.map` build intermediates, and writes `SHA256SUMS`.
 Output goes to `build/` (git-ignored — binaries are published as release assets,
 not committed).
 
-Artifacts in `build/`:
+### Versioning
+
+`FW_VERSION` at the top of `tools/build-firmware.sh` is the single source of
+truth for the release version, and it names the output files. **Bump it there
+for a new release**, then use the same number for the git tag. For a throwaway
+build, override it without editing the script:
+
+```bash
+FW_VERSION=0.3.0-rc1 tools/build-firmware.sh
+```
+
+Artifacts in `build/` (at `FW_VERSION=0.2.0`):
 
 | File | Purpose |
 |---|---|
-| `ESP32-VGA_AppleII_Emulator.merged.bin` | **the one to publish** — full image, flash at offset `0x0` |
-| `ESP32-VGA_AppleII_Emulator.ino.bin` | application only, flash at `0x10000` |
+| `ESP32-AppleII-v0.2.0.bin` | **the one to publish** — full image, flash at offset `0x0` |
+| `ESP32-AppleII-v0.2.0-app.bin` | application only, flash at `0x10000` |
 | `ESP32-VGA_AppleII_Emulator.ino.bootloader.bin` | bootloader, `0x1000` |
 | `ESP32-VGA_AppleII_Emulator.ino.partitions.bin` | partition table, `0x8000` |
 | `boot_app0.bin` | OTA selector, `0xe000` |
 | `SHA256SUMS` | checksums for all of the above |
+
+The two publishable images carry the version; the bootloader, partition table
+and OTA selector are version-neutral and keep the names arduino-cli and the
+esp32 core give them.
 
 ### Doing it by hand
 
@@ -56,7 +71,7 @@ arduino-cli compile --fqbn "esp32:esp32:esp32:PSRAM=enabled,PartitionScheme=huge
 
 # merge (paths depend on the installed core version)
 python3 ~/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py \
-  --chip esp32 merge_bin -o build/ESP32-VGA_AppleII_Emulator.merged.bin \
+  --chip esp32 merge_bin -o build/ESP32-AppleII-v0.2.0.bin \
   --flash_mode dio --flash_freq keep --flash_size 4MB \
   0x1000  build/ESP32-VGA_AppleII_Emulator.ino.bootloader.bin \
   0x8000  build/ESP32-VGA_AppleII_Emulator.ino.partitions.bin \
@@ -84,7 +99,7 @@ To verify the merged image specifically (what users will actually flash):
 ```bash
 python3 ~/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py \
   --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 build/ESP32-VGA_AppleII_Emulator.merged.bin
+  write_flash 0x0 build/ESP32-AppleII-v0.2.0.bin
 ```
 
 ## 3. Publish to the remote repository
@@ -96,7 +111,7 @@ rewritten. Publish them as GitHub Release assets instead.
 # make sure the source that produced the binary is pushed first
 git push origin HEAD
 
-# tag and publish
+# tag and publish — keep the tag in step with FW_VERSION in the build script
 VERSION=v0.2.0
 git tag -a "$VERSION" -m "Firmware $VERSION"
 git push origin "$VERSION"
@@ -104,15 +119,15 @@ git push origin "$VERSION"
 gh release create "$VERSION" \
   --title "Firmware $VERSION" \
   --notes "Apple II emulator firmware for ESP32-TTGO-VGA (VGA32 v1.4)." \
-  build/ESP32-VGA_AppleII_Emulator.merged.bin \
-  build/ESP32-VGA_AppleII_Emulator.ino.bin \
+  "build/ESP32-AppleII-$VERSION.bin" \
+  "build/ESP32-AppleII-$VERSION-app.bin" \
   build/SHA256SUMS
 ```
 
 To update an existing release's assets instead of making a new one:
 
 ```bash
-gh release upload v0.2.0 build/ESP32-VGA_AppleII_Emulator.merged.bin --clobber
+gh release upload v0.2.0 build/ESP32-AppleII-v0.2.0.bin --clobber
 ```
 
 ## 4. Flashing instructions for end users
@@ -122,7 +137,7 @@ Worth pasting into the release notes:
 ```bash
 # esptool (pip install esptool)
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-VGA_AppleII_Emulator.merged.bin
+  write_flash 0x0 ESP32-AppleII-v0.2.0.bin
 ```
 
 Or drop the merged `.bin` at offset `0x0` into
@@ -131,7 +146,9 @@ Chrome-based browser — no toolchain needed.
 
 ## Checklist for a release
 
-1. `tools/build-firmware.sh` — clean build, no warnings that matter
-2. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens, F2 FPS toggles
-3. Commit and push the source
-4. Tag, push the tag, `gh release create` with the merged binary and `SHA256SUMS`
+1. Bump `FW_VERSION` in `tools/build-firmware.sh`
+2. `tools/build-firmware.sh` — clean build, no warnings that matter
+3. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens, F2 FPS toggles
+4. Commit and push the source
+5. Tag with the same version, push the tag, `gh release create` with the merged
+   binary and `SHA256SUMS`
