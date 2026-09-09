@@ -105,6 +105,8 @@ This is where you come in. If you see something that makes you cringe, please co
 
 Think of it as a chance to mentor an AI-assisted developer through code review. We all benefit when experienced developers share their knowledge.
 
+If you're planning to dig in, start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — it covers how the pieces fit together and, more usefully, the handful of constraints that are easy to break by accident because they're invisible in the code (memory placement, single-buffering, render cache invalidation).
+
 ## Credits
 
 - **Reinaldo Torres / CoCo Byte Club** — ESP32 port and hardware design — reyco2000@cocobyte.club
