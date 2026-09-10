@@ -7,10 +7,10 @@ An Apple II+ emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class bo
 <table>
 <tr>
 <td width="50%"><img src="pictures/boot-basic.jpg" width="400" alt="Apple ][ BASIC prompt"><br><sub>Cold start with no disk mounted — straight to the Apple ][ prompt.</sub></td>
-<td width="50%"><img src="pictures/supervisor-browser.jpg" width="400" alt="Supervisor SD card browser"><br><sub><b>F1</b> supervisor: the SD card browser, with both drives empty.</sub></td>
+<td width="50%"><img src="pictures/supervisor-menu.jpg" width="400" alt="Supervisor SD card browser"><br><sub><b>F1</b> supervisor: the SD card browser, with both drives empty.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/supervisor-mounted.jpg" width="400" alt="Disk image mounted to Drive 1"><br><sub>Pressing <b>1</b> mounts the selected <code>.nib</code> into Drive 1 — no reset, so mid-game swaps work.</sub></td>
+<td width="50%"><img src="pictures/supervisor-disk-mounted.jpg" width="400" alt="Disk image mounted to Drive 1"><br><sub>Pressing <b>1</b> mounts the selected <code>.nib</code> into Drive 1 — no reset, so mid-game swaps work.</sub></td>
 <td width="50%"><img src="pictures/karateka-title.jpg" width="400" alt="Karateka title screen"><br><sub><i>Karateka</i> title screen — hires mode.</sub></td>
 </tr>
 <tr>
