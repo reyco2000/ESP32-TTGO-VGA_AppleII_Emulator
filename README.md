@@ -48,12 +48,12 @@ An Apple II+ emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class bo
 
 If you just want to run the emulator without building from source, grab the pre-built firmware and use the browser-based flasher — no toolchain, no drivers to install beyond your board's USB-serial driver.
 
-1. Download `ESP32-AppleII-v0.2.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
+1. Download `ESP32-AppleII-v0.2.1.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
 2. Connect your TTGO VGA32 board via USB
 3. Open [ESP Web Tool](https://espressif.github.io/esptool-js/) in a Chrome or Edge browser
 4. Click **Connect** and select the board's serial port
 5. Set the flash offset to `0x0000`
-6. Choose the downloaded `ESP32-AppleII-v0.2.0.bin`
+6. Choose the downloaded `ESP32-AppleII-v0.2.1.bin`
 7. Click **Program** and wait for the flash to complete
 
 Hold the **BOOT** button on the board while clicking **Connect** if the browser cannot reach the device.
@@ -66,7 +66,7 @@ Same binary, if you'd rather not use a browser:
 
 ```bash
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-AppleII-v0.2.0.bin
+  write_flash 0x0 ESP32-AppleII-v0.2.1.bin
 ```
 
 Depending on the board's USB-serial chip the port may enumerate as `/dev/ttyACM0` instead of `/dev/ttyUSB0`.
@@ -89,7 +89,7 @@ To produce a release image of your own — bootloader + partition table + boot_a
 tools/build-firmware.sh          # output in build/, plus SHA256SUMS
 ```
 
-The image is named after `FW_VERSION` at the top of that script — currently `ESP32-AppleII-v0.2.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
+The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.2.1.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
 
 ## SD Card Setup
 
