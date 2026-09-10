@@ -27,6 +27,7 @@ class VGA;
 #define SUP_PATH_LEN    256
 #define SUP_LIST_TOP    4    // first text row of the list window
 #define SUP_LIST_ROWS   16   // visible list rows
+#define SUP_ACTION_COUNT 4   // pinned [ ... ] items ahead of the SD entries
 
 // one SD directory entry shown in the browser
 struct SupEntry
@@ -49,7 +50,7 @@ public:
 	void Render(VGA* vga);
 
 private:
-	enum Mode { BROWSE, PICK_DRIVE };
+	enum Mode { BROWSE, PICK_DRIVE, ABOUT };
 
 	Apple2Machine* machine;
 	AppleFont font;
@@ -70,7 +71,7 @@ private:
 	char pickPath[SUP_PATH_LEN]; // full path of file awaiting drive choice
 
 	// virtual list layout: [0]=reset [1]=unmount d1 [2]=unmount d2
-	// then ".." when not at root, then entries[]
+	// [3]=about, then ".." when not at root, then entries[]
 	bool AtRoot() { return curPath[1] == '\0'; }
 	int VirtualCount();
 	void VirtualLabel(int index, char* out, int outlen);
@@ -83,8 +84,18 @@ private:
 	void MoveCursor(int delta);
 
 	void SetStatus(const char* msg);
-	void DrawText(int col, int row, const char* text, bool inverse);
-	void DrawRow(int row, const char* text, bool inverse);
+
+	// Drawing. fg/bg are packed RGB222 values from the palette in
+	// Supervisor.cpp; the selection bar is just a swapped pair, so the
+	// font's inverse glyph table is no longer needed here.
+	void DrawText(int col, int row, const char* text, int fg, int bg);
+	void DrawRow(int row, const char* text, int fg, int bg);
+	void DrawBar(int row, const char* text, int fg, int bg);
+	void DrawRule(int row);          // six-band Apple stripe rule
+	void DrawChrome();               // page field, margins, stripe motif
+	void RenderBrowse();
+	void RenderAbout();
+	int  RowColor(int index, bool selected, int* bg);
 };
 
 #endif

@@ -70,6 +70,23 @@ public:
 		return ((b >> 6) << 4) | ((g >> 6) << 2) | (r >> 6);
 	}
 
+	// Partial-row fill. clear() can memset because it covers whole rows;
+	// a sub-row span has to honour the x^2 byte order pixel by pixel.
+	void fillRect(int x, int y, int w, int h, int rgb)
+	{
+		if (x < 0) { w += x; x = 0; }
+		if (y < 0) { h += y; y = 0; }
+		for (int yy = y; yy < y + h && yy < 200; ++yy) {
+			uint8_t *scanline = DisplayController.getScanline(yy);
+			if (!scanline)
+				continue;
+			for (int xx = x; xx < x + w && xx < 320; ++xx) {
+				int t = xx ^ 2;
+				scanline[t] = (scanline[t] & 0xC0) | rgb;
+			}
+		}
+	}
+
 	void clear(int rgb = 0)
 	{
 		for (int y = 0; y < 200; ++y) {

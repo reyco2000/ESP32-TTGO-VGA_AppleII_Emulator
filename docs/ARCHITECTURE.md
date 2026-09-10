@@ -85,6 +85,14 @@ manage the Disk II PROM at `$C600`. It owns its own `AppleFont` and paints
 directly into the live VGA framebuffer, calling
 `Apple2Device::InvalidateRenderCache()` on close so the emulator repaints fully.
 
+Unlike the emulated text screen, the supervisor draws in colour. It is native
+firmware UI, not part of the emulated machine, so it passes explicit `fg`/`bg`
+RGB222 values to `AppleFont::RenderFont`. Those parameters default to `-1`,
+which means "green on black" — that is what keeps the emulated text screen and
+the F2 FPS overlay on the original phosphor while the menu uses a full palette.
+The font has no box-drawing glyphs and no lowercase (glyphs `0x20`-`0x5F`), so
+every bar, rule and panel is a pixel fill via `VGA::fillRect`.
+
 ## Constraints
 
 These are the things to be careful about. Each one is cheap to break by

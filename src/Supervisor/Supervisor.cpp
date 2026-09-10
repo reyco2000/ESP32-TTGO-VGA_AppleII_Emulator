@@ -9,10 +9,11 @@
  *  File   : Supervisor.cpp
  *  Module : F1 supervisor menu. Pauses emulation, browses the SD
  *           card and mounts/unmounts .nib images into either drive
- *           via Apple2Machine. Paints directly into the live VGA
- *           framebuffer, repainting only when the dirty flag is
- *           set, and invalidates the emulator's render caches on
- *           close.
+ *           via Apple2Machine, and shows an ABOUT page with the
+ *           firmware version and credits. Paints directly into the
+ *           live VGA framebuffer in colour (RGB222), repainting
+ *           only when the dirty flag is set, and invalidates the
+ *           emulator's render caches on close.
  * ============================================================
 */
 
@@ -22,8 +23,43 @@
 #include "Supervisor.h"
 #include "../AppleII/Apple2Machine.h"
 #include "../VGA/VGA.h"
+#include "../Version.h"
 
 extern fabgl::Keyboard *keyboard_ptr;
+
+//////////////////////////////////////////////////////////////////////////
+// Palette. The framebuffer is RGB222 (64 colours, 4 levels per channel);
+// this packs levels 0-3 exactly the way VGA::rgb() packs 8-bit values.
+#define RGB222(r, g, b) (((b) << 4) | ((g) << 2) | (r))
+
+static const int C_BG      = RGB222(0, 0, 1);   // dark navy page field
+static const int C_BARBG   = RGB222(0, 0, 2);   // title / footer bar fill
+static const int C_BLACK   = RGB222(0, 0, 0);
+static const int C_WHITE   = RGB222(3, 3, 3);
+static const int C_GREY    = RGB222(2, 2, 2);
+static const int C_DIM     = RGB222(1, 1, 1);
+static const int C_CYAN    = RGB222(0, 3, 3);
+static const int C_DIMCYAN = RGB222(0, 2, 2);
+static const int C_GREEN   = RGB222(0, 3, 0);
+static const int C_YELLOW  = RGB222(3, 3, 0);
+static const int C_AMBER   = RGB222(3, 2, 0);
+static const int C_ORANGE  = RGB222(3, 1, 0);
+static const int C_RED     = RGB222(3, 0, 0);
+static const int C_MAGENTA = RGB222(3, 0, 3);
+static const int C_BLUE    = RGB222(1, 1, 3);
+
+// Apple logo stripe order, used for the rule under the title and the
+// accent band down the right margin.
+static const int stripe[6] = { C_GREEN, C_YELLOW, C_ORANGE,
+                               C_RED,   C_MAGENTA, C_BLUE };
+
+// The 40x24 text grid is 280x192; the framebuffer is 320x200. Centring the
+// grid leaves a 20px margin either side and 4px top and bottom for chrome.
+#define SUP_ORIGIN_X 20
+#define SUP_ORIGIN_Y 4
+
+static inline int ColX(int col) { return SUP_ORIGIN_X + col * FONT_X; }
+static inline int RowY(int row) { return SUP_ORIGIN_Y + row * FONT_Y; }
 
 Supervisor::Supervisor(Apple2Machine* m)
 {
@@ -74,7 +110,7 @@ void Supervisor::SetStatus(const char* msg)
 }
 
 // ASCII -> Apple II font glyph: identity for 0x20-0x5F, no lowercase in the font
-void Supervisor::DrawText(int col, int row, const char* text, bool inverse)
+void Supervisor::DrawText(int col, int row, const char* text, int fg, int bg)
 {
 	for (int i = 0; text[i] != '\0' && (col + i) < SCREENTEXT_X; i++)
 	{
@@ -83,13 +119,13 @@ void Supervisor::DrawText(int col, int row, const char* text, bool inverse)
 			g -= 32;
 		if (g < 0x20 || g > 0x5F)
 			g = 0x20;
-		font.RenderFont(vga, g, (col + i) * FONT_X, row * FONT_Y, inverse);
+		font.RenderFont(vga, g, ColX(col + i), RowY(row), false, fg, bg);
 	}
 }
 
-// full 40-column row: pads with spaces (so inverse bars span the line),
+// full 40-column row: pads with spaces (so selection bars span the line),
 // truncates over-long text with a trailing '~'
-void Supervisor::DrawRow(int row, const char* text, bool inverse)
+void Supervisor::DrawRow(int row, const char* text, int fg, int bg)
 {
 	char line[SCREENTEXT_X + 1];
 	int len = strlen(text);
@@ -101,7 +137,69 @@ void Supervisor::DrawRow(int row, const char* text, bool inverse)
 	}
 	else
 		snprintf(line, sizeof(line), "%-40s", text);
-	DrawText(0, row, line, inverse);
+	DrawText(0, row, line, fg, bg);
+}
+
+// A row whose background bleeds past the text grid to the screen edge, so the
+// title and footer read as full-width bars rather than floating strips.
+void Supervisor::DrawBar(int row, const char* text, int fg, int bg)
+{
+	int y   = RowY(row);
+	int top = (row == 0) ? 0 : y;
+	int bot = (row == SCREENTEXT_Y - 1) ? 200 : y + FONT_Y;
+	vga->fillRect(0, top, 320, bot - top, bg);
+	DrawRow(row, text, fg, bg);
+}
+
+// Six-band Apple stripe rule, drawn in the middle of a text row. The font has
+// no box-drawing glyphs, so every rule and panel here is a pixel fill.
+void Supervisor::DrawRule(int row)
+{
+	int y = RowY(row) + 2;
+	for (int i = 0; i < 6; i++)
+	{
+		int x0 = (320 * i) / 6;
+		int x1 = (320 * (i + 1)) / 6;
+		vga->fillRect(x0, y, x1 - x0, 3, stripe[i]);
+	}
+}
+
+// Page field plus the vertical stripe accent in the right margin.
+void Supervisor::DrawChrome()
+{
+	vga->clear(C_BG);
+
+	int top    = RowY(SUP_LIST_TOP);
+	int bottom = RowY(SUP_LIST_TOP + SUP_LIST_ROWS);
+	int band   = (bottom - top) / 6;
+	for (int i = 0; i < 6; i++)
+		vga->fillRect(306, top + i * band, 8, band, stripe[i]);
+}
+
+// Colour for one list row. The selection bar is a swapped fg/bg pair rather
+// than the font's inverse glyph table, so it can be any colour.
+int Supervisor::RowColor(int index, bool selected, int* bg)
+{
+	if (selected)
+	{
+		*bg = C_CYAN;
+		return C_BLACK;
+	}
+
+	*bg = C_BG;
+	if (index < SUP_ACTION_COUNT)
+		return C_YELLOW;                     // [ ... ] action items
+
+	int idx = index - SUP_ACTION_COUNT;
+	if (!AtRoot())
+	{
+		if (idx == 0)
+			return C_CYAN;                   // ".." is a directory too
+		idx--;
+	}
+	if (idx < entryCount && entries[idx].isDir)
+		return C_CYAN;
+	return C_WHITE;                          // .nib files
 }
 
 void Supervisor::Update()
@@ -118,6 +216,15 @@ void Supervisor::Update()
 
 		// every state change in this menu originates from a keypress
 		dirty = true;
+
+		if (mode == ABOUT)
+		{
+			// ESC backs out to the browser here; it must not close the
+			// supervisor and resume emulation.
+			if (vk == fabgl::VK_ESCAPE || vk == fabgl::VK_RETURN)
+				mode = BROWSE;
+			continue;
+		}
 
 		if (mode == PICK_DRIVE)
 		{
@@ -159,19 +266,26 @@ void Supervisor::Render(VGA* vgaOut)
 		return;
 	dirty = false;
 
-	vga->clear(0);
+	if (mode == ABOUT)
+		RenderAbout();
+	else
+		RenderBrowse();
+}
 
-	DrawRow(0, "              SUPERVISOR", false);
+void Supervisor::RenderBrowse()
+{
+	DrawChrome();
+	DrawBar(0, "               SUPERVISOR", C_WHITE, C_BARBG);
 
 	char line[64];
 	std::string d1 = machine->device.GetDiskName(0);
 	std::string d2 = machine->device.GetDiskName(1);
 	snprintf(line, sizeof(line), "D1: %s", d1.empty() ? "(EMPTY)" : d1.c_str());
-	DrawRow(1, line, false);
+	DrawRow(1, line, d1.empty() ? C_GREY : C_GREEN, C_BG);
 	snprintf(line, sizeof(line), "D2: %s", d2.empty() ? "(EMPTY)" : d2.c_str());
-	DrawRow(2, line, false);
+	DrawRow(2, line, d2.empty() ? C_GREY : C_GREEN, C_BG);
 
-	DrawRow(3, "----------------------------------------", false);
+	DrawRule(3);
 
 	char label[SUP_NAME_LEN + 24];
 	int count = VirtualCount();
@@ -181,27 +295,62 @@ void Supervisor::Render(VGA* vgaOut)
 		if (idx >= count)
 			break;
 		VirtualLabel(idx, label, sizeof(label));
-		DrawRow(SUP_LIST_TOP + i, label, idx == cursor);
+		int bg;
+		int fg = RowColor(idx, idx == cursor, &bg);
+		DrawRow(SUP_LIST_TOP + i, label, fg, bg);
 	}
 
-	DrawRow(20, "----------------------------------------", false);
+	vga->fillRect(0, RowY(20) + 3, 320, 1, C_DIM);
 
 	if (mode == PICK_DRIVE)
-		DrawRow(21, "MOUNT TO: 1)DRIVE 1 2)DRIVE 2 ESC)BACK", false);
+		DrawRow(21, "MOUNT TO: 1)DRIVE 1 2)DRIVE 2 ESC)BACK", C_YELLOW, C_BG);
 	else
-		DrawRow(21, status, false);
+		DrawRow(21, status, sdError ? C_RED : C_AMBER, C_BG);
 
-	DrawRow(22, curPath, false);
-	DrawRow(23, " ARROWS:MOVE  ENTER:SELECT  ESC:EXIT", false);
+	DrawRow(22, curPath, C_DIMCYAN, C_BG);
+	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:EXIT", C_GREY, C_BARBG);
+}
+
+// Version and credits. The font is uppercase-only, glyphs 0x20-0x5F, so every
+// string here stays inside that range.
+void Supervisor::RenderAbout()
+{
+	DrawChrome();
+	DrawBar(0, "                 ABOUT", C_WHITE, C_BARBG);
+
+	DrawRow(2, "        APPLE II EMULATOR FOR ESP32", C_WHITE, C_BG);
+	DrawRule(3);
+
+	DrawText(2, 5, "VERSION", C_YELLOW, C_BG);
+	DrawText(13, 5, FW_VERSION_STR, C_WHITE, C_BG);
+	DrawText(2, 6, "BUILT", C_YELLOW, C_BG);
+	DrawText(13, 6, FW_BUILD_DATE, C_WHITE, C_BG);
+	DrawText(2, 7, "DISPLAY", C_YELLOW, C_BG);
+	DrawText(13, 7, "320X200 VGA / 64 COLORS", C_WHITE, C_BG);
+	DrawText(2, 8, "CPU", C_YELLOW, C_BG);
+	DrawText(13, 8, "MOS 6502", C_WHITE, C_BG);
+
+	DrawText(2, 10, "CREDITS", C_YELLOW, C_BG);
+	DrawText(2, 11, "REINALDO TORRES / COCO BYTE CLUB", C_WHITE, C_BG);
+	DrawText(2, 12, "BASED ON CODESAFE", C_GREY, C_BG);
+	DrawText(4, 13, "ESP32-VGA_APPLEII_EMULATOR", C_GREY, C_BG);
+	DrawText(2, 14, "FABGL BY FABRIZIO DI VITTORIO", C_GREY, C_BG);
+	DrawText(2, 15, "CO-DEVELOPED WITH CLAUDE CODE", C_GREY, C_BG);
+	DrawText(2, 16, "MIT LICENSE", C_GREY, C_BG);
+
+	DrawText(2, 18, "GITHUB.COM/REYCO2000/", C_DIMCYAN, C_BG);
+	DrawText(4, 19, "ESP32-TTGO-VGA_APPLEII_EMULATOR", C_DIMCYAN, C_BG);
+
+	DrawBar(23, "           PRESS ESC TO RETURN", C_GREY, C_BARBG);
 }
 
 //////////////////////////////////////////////////////////////////////////
-// Virtual list: [0]=reset [1]=unmount d1 [2]=unmount d2, then ".." when
-// not at root, then the scanned entries
+// Virtual list: [0]=reset [1]=unmount d1 [2]=unmount d2 [3]=about, then ".."
+// when not at root, then the scanned entries
 
 int Supervisor::VirtualCount()
 {
-	return 3 + (AtRoot() ? 0 : 1) + entryCount;
+	return SUP_ACTION_COUNT + (AtRoot() ? 0 : 1) + entryCount;
 }
 
 void Supervisor::VirtualLabel(int index, char* out, int outlen)
@@ -221,13 +370,20 @@ void Supervisor::VirtualLabel(int index, char* out, int outlen)
 			snprintf(out, outlen, " [ UNMOUNT D%d: %s ]", drv + 1, name.c_str());
 		return;
 	}
+	if (index == 3)
+	{
+		snprintf(out, outlen, " [ ABOUT ]");
+		return;
+	}
 
-	int idx = index - 3;
+	int idx = index - SUP_ACTION_COUNT;
 	if (!AtRoot())
 	{
 		if (idx == 0)
 		{
-			snprintf(out, outlen, " ..");
+			// " .." alone is two baseline pixels in this font — near
+			// invisible at 7x8. Spell the action out instead.
+			snprintf(out, outlen, " .. UP ONE LEVEL");
 			return;
 		}
 		idx--;
@@ -352,7 +508,12 @@ void Supervisor::Select()
 			SetStatus(drv == 0 ? "DRIVE 1 EMPTY" : "DRIVE 2 EMPTY");
 		return;
 	}
-	index -= 3;
+	if (index == 3)                          // [ ABOUT ]
+	{
+		mode = ABOUT;
+		return;
+	}
+	index -= SUP_ACTION_COUNT;
 
 	if (!AtRoot())
 	{

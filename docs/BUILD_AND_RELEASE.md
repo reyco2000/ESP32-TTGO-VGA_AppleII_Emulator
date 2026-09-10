@@ -36,10 +36,12 @@ not committed).
 
 ### Versioning
 
-`FW_VERSION` at the top of `tools/build-firmware.sh` is the single source of
-truth for the release version, and it names the output files. **Bump it there
-for a new release**, then use the same number for the git tag. For a throwaway
-build, override it without editing the script:
+`FW_VERSION_STR` in [`src/Version.h`](../src/Version.h) is the single source of
+truth for the release version. `tools/build-firmware.sh` parses it out of that
+header to name the output files, and the supervisor's `[ ABOUT ]` page displays
+it on screen, so the firmware always reports the version it was built as.
+**Bump it there for a new release**, then use the same number for the git tag.
+For a throwaway build, override it without editing anything:
 
 ```bash
 FW_VERSION=0.3.0-rc1 tools/build-firmware.sh
@@ -146,9 +148,10 @@ Chrome-based browser — no toolchain needed.
 
 ## Checklist for a release
 
-1. Bump `FW_VERSION` in `tools/build-firmware.sh`
+1. Bump `FW_VERSION_STR` in `src/Version.h`
 2. `tools/build-firmware.sh` — clean build, no warnings that matter
-3. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens, F2 FPS toggles
+3. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens (check
+   `[ ABOUT ]` reports the version you just bumped), F2 FPS toggles
 4. Commit and push the source
 5. Tag with the same version, push the tag, `gh release create` with the merged
    binary and `SHA256SUMS`
