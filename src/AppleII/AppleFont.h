@@ -34,7 +34,10 @@ public:
 	// Draws straight into the VGA framebuffer. There is no intermediate
 	// backbuffer: the framebuffer itself persists between frames, which is
 	// what lets the callers' dirty-cell caches skip unchanged glyphs.
-	void RenderFont(VGA *vga, int fontnum, int x, int y, bool inv);
+	// fg/bg are packed RGB222 framebuffer values; -1 keeps the Apple II
+	// phosphor default (green on black) used by the emulated text screen.
+	void RenderFont(VGA *vga, int fontnum, int x, int y, bool inv,
+	                int fg = -1, int bg = -1);
 
 };
 

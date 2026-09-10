@@ -16,8 +16,10 @@
 #
 # Usage:  tools/build-firmware.sh [output-dir]
 #
-# FW_VERSION is the single source of truth for the released firmware
-# version; bump it here for a new release. Override for a one-off build with:
+# src/Version.h is the single source of truth for the released firmware
+# version; bump FW_VERSION_STR there for a new release, and the ABOUT page in
+# the supervisor menu and this script stay in step. Override for a one-off
+# build with:
 #   FW_VERSION=0.3.0-rc1 tools/build-firmware.sh
 #
 set -euo pipefail
@@ -26,7 +28,9 @@ FQBN="esp32:esp32:esp32:PSRAM=enabled,PartitionScheme=huge_app"
 SKETCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${1:-$SKETCH_DIR/build}"
 NAME="ESP32-VGA_AppleII_Emulator"       # arduino-cli names its outputs after the sketch
-FW_VERSION="${FW_VERSION:-0.2.0}"
+VERSION_H="$SKETCH_DIR/src/Version.h"
+FW_VERSION="${FW_VERSION:-$(sed -n 's/.*FW_VERSION_STR[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_H")}"
+[ -n "$FW_VERSION" ] || { echo "error: could not read FW_VERSION_STR from $VERSION_H"; exit 1; }
 RELEASE_NAME="ESP32-AppleII-v$FW_VERSION"
 
 command -v arduino-cli >/dev/null || { echo "error: arduino-cli not found in PATH"; exit 1; }

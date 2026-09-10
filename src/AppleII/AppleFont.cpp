@@ -227,14 +227,17 @@ void AppleFont::Create()
 
 }
 
-void AppleFont::RenderFont(VGA* vga, int fontnum, int posx, int posy, bool inv)
+void AppleFont::RenderFont(VGA* vga, int fontnum, int posx, int posy, bool inv,
+                           int fg, int bg)
 {
 	if (vga == NULL)
 		return;
 
 	const unsigned char* glyph = inv ? invfont[fontnum] : font[fontnum];
-	const int on  = vga->rgb(0, 0xFF, 0);
-	const int off = vga->rgb(0, 0, 0);
+	// The emulated text screen and the FPS overlay pass no colors and keep the
+	// green phosphor; the supervisor menu passes its own palette entries.
+	const int on  = (fg < 0) ? vga->rgb(0, 0xFF, 0) : fg;
+	const int off = (bg < 0) ? vga->rgb(0, 0, 0)    : bg;
 
 	int pos = 0;
 	for (int y = 0; y < FONT_Y; y++)

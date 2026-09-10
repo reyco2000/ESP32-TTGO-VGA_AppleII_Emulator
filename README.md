@@ -8,7 +8,7 @@ An Apple II+ emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class bo
 - Apple II+ memory map with Language Card bank switching
 - Text, lores, and hires video modes rendered to VGA 640×480@60Hz
 - Two emulated Disk II drives with nibblized (`.nib`) disk images
-- **Supervisor menu (F1)**: pauses emulation and opens an on-screen SD card browser — navigate subdirectories, mount/unmount `.nib` images into Drive 1 or Drive 2, and reset the machine. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
+- **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount `.nib` images into Drive 1 or Drive 2, reset the machine, or open `[ ABOUT ]` for the firmware version and credits. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
 - Boots to BASIC with no disk mounted; the Disk II boot PROM at `$C600` is managed automatically as disks are mounted/unmounted so `PR#6` always behaves correctly
 
@@ -85,7 +85,7 @@ The card is driven over SPI on the VGA32's on-board socket — SCK 14, MISO 2, M
 ## Usage
 
 - The machine powers on into BASIC/monitor with no disk.
-- Press **F1** to open the supervisor menu: arrow keys to move, **Enter** to open a directory or select a `.nib` (then `1`/`2` picks the drive), **ESC** to resume emulation.
+- Press **F1** to open the supervisor menu: arrow keys to move, **Enter** to open a directory or select a `.nib` (then `1`/`2` picks the drive), **ESC** to resume emulation. `[ ABOUT ]` shows the firmware version, build date and credits — **ESC** there returns to the browser rather than resuming.
 - Press **F2** to show or hide the on-screen FPS counter.
 - Use the menu's `[ RESET MACHINE ]` item (or `PR#6` from BASIC) to boot a mounted disk.
 
