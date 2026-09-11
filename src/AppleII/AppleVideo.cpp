@@ -1,0 +1,319 @@
+/*
+ * ============================================================
+ *        APPLE II Emulator for ESP32-TTGO-VGA
+ *   (C) 2026 Reinaldo Torres / CoCo Byte Club
+ *   https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator
+ *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
+ *   MIT License
+ * ============================================================
+ *  File   : AppleVideo.cpp
+ *  Module : Apple II video. Renders text, lores and hires from
+ *           emulated memory into the 640x200 VGA framebuffer as
+ *           palette indices: a 560x192 screen, each Apple dot two
+ *           pixels wide, centred in a black border. Per-cell dirty
+ *           caches skip unchanged cells. Also draws the F2 FPS
+ *           overlay.
+ * ============================================================
+*/
+
+#include "Predef.h"
+#include "AppleVideo.h"
+#include "AppleMem.h"
+#include "Apple2Device.h"
+#include "../VGA/VGA.h"
+
+// The Apple screen, 280x192 dots at double width, centred on the framebuffer.
+// X0 is even, so every dot is one whole framebuffer byte.
+#define SCREEN_X0   40
+#define SCREEN_Y0   4
+#define CELL_W      (FONT_X * 2)             // a 40-column text or lores cell
+
+const int offsetGR[24] = {                                                    // helper for TEXT and GR video generation
+  0x000, 0x080, 0x100, 0x180, 0x200, 0x280, 0x300, 0x380,                     // lines 0-7
+  0x028, 0x0A8, 0x128, 0x1A8, 0x228, 0x2A8, 0x328, 0x3A8,                     // lines 8-15
+  0x050, 0x0D0, 0x150, 0x1D0, 0x250, 0x2D0, 0x350, 0x3D0 };                    // lines 16-23
+
+
+const int offsetHGR[192] = {                                                  // helper for HGR video generation
+	0x0000, 0x0400, 0x0800, 0x0C00, 0x1000, 0x1400, 0x1800, 0x1C00,             // lines 0-7
+	0x0080, 0x0480, 0x0880, 0x0C80, 0x1080, 0x1480, 0x1880, 0x1C80,             // lines 8-15
+	0x0100, 0x0500, 0x0900, 0x0D00, 0x1100, 0x1500, 0x1900, 0x1D00,             // lines 16-23
+	0x0180, 0x0580, 0x0980, 0x0D80, 0x1180, 0x1580, 0x1980, 0x1D80,
+	0x0200, 0x0600, 0x0A00, 0x0E00, 0x1200, 0x1600, 0x1A00, 0x1E00,
+	0x0280, 0x0680, 0x0A80, 0x0E80, 0x1280, 0x1680, 0x1A80, 0x1E80,
+	0x0300, 0x0700, 0x0B00, 0x0F00, 0x1300, 0x1700, 0x1B00, 0x1F00,
+	0x0380, 0x0780, 0x0B80, 0x0F80, 0x1380, 0x1780, 0x1B80, 0x1F80,
+	0x0028, 0x0428, 0x0828, 0x0C28, 0x1028, 0x1428, 0x1828, 0x1C28,
+	0x00A8, 0x04A8, 0x08A8, 0x0CA8, 0x10A8, 0x14A8, 0x18A8, 0x1CA8,
+	0x0128, 0x0528, 0x0928, 0x0D28, 0x1128, 0x1528, 0x1928, 0x1D28,
+	0x01A8, 0x05A8, 0x09A8, 0x0DA8, 0x11A8, 0x15A8, 0x19A8, 0x1DA8,
+	0x0228, 0x0628, 0x0A28, 0x0E28, 0x1228, 0x1628, 0x1A28, 0x1E28,
+	0x02A8, 0x06A8, 0x0AA8, 0x0EA8, 0x12A8, 0x16A8, 0x1AA8, 0x1EA8,
+	0x0328, 0x0728, 0x0B28, 0x0F28, 0x1328, 0x1728, 0x1B28, 0x1F28,
+	0x03A8, 0x07A8, 0x0BA8, 0x0FA8, 0x13A8, 0x17A8, 0x1BA8, 0x1FA8,
+	0x0050, 0x0450, 0x0850, 0x0C50, 0x1050, 0x1450, 0x1850, 0x1C50,
+	0x00D0, 0x04D0, 0x08D0, 0x0CD0, 0x10D0, 0x14D0, 0x18D0, 0x1CD0,
+	0x0150, 0x0550, 0x0950, 0x0D50, 0x1150, 0x1550, 0x1950, 0x1D50,
+	0x01D0, 0x05D0, 0x09D0, 0x0DD0, 0x11D0, 0x15D0, 0x19D0, 0x1DD0,
+	0x0250, 0x0650, 0x0A50, 0x0E50, 0x1250, 0x1650, 0x1A50, 0x1E50,
+	0x02D0, 0x06D0, 0x0AD0, 0x0ED0, 0x12D0, 0x16D0, 0x1AD0, 0x1ED0,             // lines 168-183
+	0x0350, 0x0750, 0x0B50, 0x0F50, 0x1350, 0x1750, 0x1B50, 0x1F50,             // lines 176-183
+	0x03D0, 0x07D0, 0x0BD0, 0x0FD0, 0x13D0, 0x17D0, 0x1BD0, 0x1FD0 };            // lines 184-191
+
+
+// The palette while the emulator owns the screen: the 16 lores colours in
+// Apple order, so a lores nibble is its own index. Hires and text use
+// entries from the same set.
+static const VGAColor applePalette[16] =
+{
+	{   0,   0,   0 }, { 226,  57,  86 }, {  28, 116, 205 }, { 126, 110, 173 },
+	{  31, 129, 128 }, { 137, 130, 122 }, {  86, 168, 228 }, { 144, 178, 223 },
+	{ 151,  88,  34 }, { 234, 108,  21 }, { 158, 151, 143 }, { 255, 206, 240 },
+	{ 144, 192,  49 }, { 255, 253, 166 }, { 159, 210, 213 }, { 255, 255, 255 }
+};
+
+#define A2_BLACK    0
+#define A2_VIOLET   3
+#define A2_BLUE     6
+#define A2_ORANGE   9
+#define A2_GREEN    12
+#define A2_WHITE    15
+
+// Hires colours, indexed by even * 8 + colour set * 4 + dot * 2 + previous
+// dot, as the renderer always has. The old RGB renderer drew the "even"
+// half in darker shades; with 16 palette entries they take the full colour
+// of the same hue.
+static const BYTE hiresColor[16] =
+{
+	A2_BLACK, A2_GREEN,  A2_VIOLET, A2_WHITE, A2_BLACK, A2_ORANGE, A2_BLUE,   A2_WHITE,
+	A2_BLACK, A2_VIOLET, A2_GREEN,  A2_WHITE, A2_BLACK, A2_BLUE,   A2_ORANGE, A2_WHITE
+};
+
+AppleVideo::AppleVideo()
+{
+	vga = NULL;
+	// the first frame loads the palette and clears the border
+	fullRepaint = true;
+	Reset();
+}
+
+void AppleVideo::Create()
+{
+	font.Create();
+}
+
+void AppleVideo::Reset()
+{
+	memset(LoResCache, 0, sizeof(LoResCache));
+	memset(TextCache, 0xFF, sizeof(TextCache));
+	memset(HiResCache, 0, sizeof(HiResCache));
+	memset(previousBit, 0, sizeof(previousBit));
+	flashCycle = 0;
+}
+
+void AppleVideo::InvalidateRenderCache()
+{
+	memset(LoResCache, 0xFF, sizeof(LoResCache));
+	memset(TextCache, 0xFF, sizeof(TextCache));
+	memset(HiResCache, 0xFF, sizeof(HiResCache));
+	memset(previousBit, 0, sizeof(previousBit));
+	// whoever drew over us changed the palette and the border as well
+	fullRepaint = true;
+}
+
+/*
+	TEXT 40x24 ( 7x8 Font )
+	LORES : 40x24 (MIX 40x20)
+	HIRES : 280×192 (MIX 280×160)
+	In MIX mode the bottom is TEXT ( 4 Line : 32 pixel )
+*/
+// F2 FPS overlay: 7 text cells in the top right corner ("999 FPS").
+// FPS_COL is where the glyphs go; hires caches at a 2-byte (14 dot)
+// granularity, so the invalidated span starts one byte column earlier.
+#define FPS_COL			33
+#define FPS_LEN			7
+#define FPS_HIRES_COL	32
+
+void AppleVideo::InvalidateFpsOverlayRegion()
+{
+	for (int col = FPS_HIRES_COL; col < SCREENTEXT_X; col++)
+	{
+		if (col >= FPS_COL)
+		{
+			TextCache[0][col] = -1;
+			LoResCache[0][col] = -1;
+		}
+		for (int line = 0; line < FONT_Y; line++)
+		{
+			HiResCache[line][col] = -1;
+			previousBit[line][col] = 0;
+		}
+	}
+}
+
+void AppleVideo::RenderFpsOverlay(int fps)
+{
+	char text[FPS_LEN + 1];
+	if (fps < 0)   fps = 0;
+	if (fps > 999) fps = 999;
+	snprintf(text, sizeof(text), "%3d FPS", fps);
+
+	// RenderFont paints the whole cell, so the black background still
+	// covers whatever the emulator drew underneath
+	for (int i = 0; i < FPS_LEN; i++)
+		font.RenderFont(vga, (BYTE)text[i], SCREEN_X0 + (FPS_COL + i) * CELL_W, SCREEN_Y0,
+		                false, A2_GREEN, A2_BLACK);
+}
+
+void AppleVideo::Render(Memory& mem, const Apple2Device& dev, int frame, VGA* vgaOut)
+{
+	vga = vgaOut;
+	if (vga == NULL)
+		return;
+
+	// Power-up, or back from the supervisor with its palette and chrome on
+	// screen: restore our palette and a black border. The caches were
+	// invalidated with this, so every cell repaints below.
+	if (fullRepaint)
+	{
+		vga->setPalette(applePalette);
+		vga->clear(A2_BLACK);
+		fullRepaint = false;
+	}
+
+	// the overlay scribbles over cells the caches believe are up to date,
+	// so give them back to the emulator before it paints this frame
+	if (dev.fpsOverlay)
+		InvalidateFpsOverlayRegion();
+
+	// TEXT wins over the graphics switches; MIXED keeps the bottom four
+	// text lines under lores or hires
+	if (!dev.textMode)
+	{
+		if (dev.hires_Mode)
+			RenderHires(mem, dev.videoPage, dev.mixedMode ? 160 : 192);
+		else
+			RenderLores(mem, dev.videoPage, dev.mixedMode ? 20 : 24);
+	}
+	if (dev.textMode || dev.mixedMode)
+		RenderText40(mem, dev.videoPage, dev.textMode ? 0 : 20, frame);
+
+	// drawn last: the overlay sits on top of the emulated screen
+	if (dev.fpsOverlay)
+		RenderFpsOverlay(dev.fpsValue);
+
+	if (++flashCycle == 30)
+		flashCycle = 0;
+}
+
+void AppleVideo::RenderText40(Memory& mem, int page, int firstLine, int frame)
+{
+	WORD base = page * 0x0400;
+
+	for (int line = firstLine; line < SCREENTEXT_Y; line++)
+	{
+		for (int col = 0; col < SCREENTEXT_X; col++)
+		{
+			// read video memory
+			BYTE glyph = mem.ReadByte(base + offsetGR[line] + col);
+
+			int fontattr = 0;
+			if (glyph > 0x7F)
+				fontattr = FONT_NORMAL;
+			else if (glyph < 0x40)
+				fontattr = FONT_INVERSE;
+			else
+				fontattr = FONT_FLASH;
+
+			glyph &= 0x7F; // unset bit 7
+			if (glyph > 0x5F) glyph &= 0x3F; // shifts to match
+			if (glyph < 0x20) glyph |= 0x40; // the ASCII codes
+
+			bool inverse = !(fontattr == FONT_NORMAL || (fontattr == FONT_FLASH && frame < 15));
+
+			// only redraw a cell whose glyph or flash phase actually changed
+			int drawn = glyph | (inverse ? 0x100 : 0);
+			if (TextCache[line][col] != drawn || !flashCycle)
+			{
+				TextCache[line][col] = drawn;
+				font.RenderFont(vga, glyph, SCREEN_X0 + col * CELL_W, SCREEN_Y0 + line * FONT_Y,
+				                inverse, A2_WHITE, A2_BLACK);
+			}
+		}
+	}
+}
+
+// A lores cell is two 14x4 blocks, the top one from the low nibble. The
+// nibble is the palette index.
+void AppleVideo::RenderLores(Memory& mem, int page, int lines)
+{
+	WORD base = page * 0x0400;
+
+	for (int line = 0; line < lines; line++)
+	{
+		for (int col = 0; col < SCREENTEXT_X; col++)
+		{
+			BYTE glyph = mem.ReadByte(base + offsetGR[line] + col);
+			if (LoResCache[line][col] == glyph && flashCycle)
+				continue;
+			LoResCache[line][col] = glyph;
+
+			int byteX = (SCREEN_X0 + col * CELL_W) >> 1;
+			int y = SCREEN_Y0 + line * FONT_Y;
+			BYTE top    = (glyph & 0x0F) * 0x11;          // both nibbles of the byte
+			BYTE bottom = (glyph >> 4) * 0x11;
+			for (int r = 0; r < FONT_Y; r++)
+				memset(vga->row(y + r) + byteX, r < 4 ? top : bottom, CELL_W / 2);
+		}
+	}
+}
+
+void AppleVideo::RenderHires(Memory& mem, int page, int lines)
+{
+	WORD base = page * 0x2000;
+	BYTE bits[16];
+
+	for (int line = 0; line < lines; line++)
+	{
+		// one framebuffer byte per Apple dot
+		uint8_t* out = vga->row(SCREEN_Y0 + line) + (SCREEN_X0 >> 1);
+
+		// for every 14 horizontal dots
+		for (int col = 0; col < SCREENTEXT_X; col += 2)
+		{
+			WORD word = (WORD)(mem.ReadByte(base + offsetHGR[line] + col + 1)) << 8;   // store the two next bytes into 'word'
+			word += mem.ReadByte(base + offsetHGR[line] + col);                        // in reverse order
+
+			// check if this group of dots needs a redraw
+			if (HiResCache[line][col] == word && flashCycle)
+				continue;
+
+			for (int bit = 0; bit < 16; bit++)                                        // store all bits 'word' into 'bits'
+				bits[bit] = (word >> bit) & 1;
+
+			int x = col * 7;
+			BYTE colorSet = bits[7] * 4;                                               // select the right color set
+			BYTE pbit = previousBit[line][col];                                        // the bit value of the left dot
+			BYTE even = 0;
+			int bit = 0;                                                               // starting at 1st bit of 1st byte
+
+			while (bit < 15)
+			{                                                                          // until we reach bit7 of 2nd byte
+				if (bit == 7)
+				{                                                                      // moving into the second byte
+					colorSet = bits[15] * 4;                                           // update the color set
+					bit++;                                                             // skip bit 7
+				}
+				out[x++] = hiresColor[even + colorSet + (bits[bit] << 1) + pbit] * 0x11;
+				pbit = bits[bit++];                                                    // proceed to the next dot
+				even = even ? 0 : 8;                                                   // alternate dots take the "even" colours
+			}
+
+			HiResCache[line][col] = word;                                             // update the video cache
+			if ((col < 37) && (previousBit[line][col + 2] != pbit)) {                 // check color franging effect on the dot after
+				previousBit[line][col + 2] = pbit;                                    // set pbit and clear the
+				HiResCache[line][col + 2] = -1;                                       // video cache for next dot
+			}
+		}
+	}
+}

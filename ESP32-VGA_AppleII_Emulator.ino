@@ -29,7 +29,7 @@
 // Global pointer to keyboard for Apple2Device to read from
 fabgl::Keyboard *keyboard_ptr = nullptr;
 fabgl::PS2Controller PS2Controller;
-fabgl::VGAController DisplayController;
+AppleVGAController DisplayController;       // see src/VGA/VGA.h
 fabgl::Canvas Canvas(&DisplayController);
 
 VGA *vga;
@@ -67,6 +67,8 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels)
         file = root.openNextFile();
     }
 }
+
+static void EmulationTask(void*);
 
 void setup()
 {
@@ -108,7 +110,13 @@ void setup()
 
     // Initialize FabGL VGA controller
     DisplayController.begin();
-    DisplayController.setResolution(VGA_640x480_60Hz, 320, 200);
+    // 640x200 in 16 colours (from 64): wide enough for the IIe's 560-dot
+    // 80-column text and double hi-res. The mode is 640x240 line-doubled,
+    // i.e. standard 640x480@60Hz timing; 640x200@70Hz is not accepted by
+    // every monitor. FabGL centres the 200-line viewport in the 240 lines.
+    // At 4 bits per pixel the framebuffer is the same 64K of internal RAM
+    // the old 320x200 8-bit one took.
+    DisplayController.setResolution(VGA_640x240_60Hz, 640, 200);
 
     // Print VGA timing and resolution diagnostics
     Serial.println("\n=== FabGL Video Mode Diagnostics ===");
@@ -149,6 +157,14 @@ void setup()
     DEBUG_PRINTLN("===> INIT Machine");
     machine->InitMachine();
     supervisor = new Supervisor(machine);
+
+    // VGA16Controller converts every scanline in an ISR pinned to core 1,
+    // where the Arduino loop runs; sharing that core cost the emulator about
+    // a third of its speed. Core 0 has nothing else to do (no WiFi or BT),
+    // so the emulator gets a task of its own there. The task never yields,
+    // so core 0's idle-task watchdog has to go.
+    disableCore0WDT();
+    xTaskCreatePinnedToCore(EmulationTask, "emulation", 16384, NULL, 1, NULL, 0);
 }
 
 int frame = 0;
@@ -156,7 +172,9 @@ int fpscount = 0;
 unsigned long fpsMillis = 0;
 unsigned long heapCheckMillis = 0;
 
-void loop()
+// One video frame: emulate (or run the supervisor), render, count FPS.
+// Runs in EmulationTask on core 0, see setup().
+static void RunFrame()
 {
     if (supervisor->IsActive())
     {
@@ -196,4 +214,16 @@ void loop()
         machine->device.fpsValue = fpscount;
         fpscount = 0;
     }
+}
+
+static void EmulationTask(void*)
+{
+    for (;;)
+        RunFrame();
+}
+
+void loop()
+{
+    // everything runs in EmulationTask; the Arduino loop task has no work
+    vTaskDelete(NULL);
 }

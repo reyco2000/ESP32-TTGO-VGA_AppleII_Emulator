@@ -11,7 +11,7 @@
  *           card and mounts/unmounts .nib images into either drive
  *           via Apple2Machine, and shows an ABOUT page with the
  *           firmware version and credits. Paints directly into the
- *           live VGA framebuffer in colour (RGB222), repainting
+ *           live VGA framebuffer in its own palette, repainting
  *           only when the dirty flag is set, and invalidates the
  *           emulator's render caches on close.
  * ============================================================
@@ -28,37 +28,50 @@
 extern fabgl::Keyboard *keyboard_ptr;
 
 //////////////////////////////////////////////////////////////////////////
-// Palette. The framebuffer is RGB222 (64 colours, 4 levels per channel);
-// this packs levels 0-3 exactly the way VGA::rgb() packs 8-bit values.
-#define RGB222(r, g, b) (((b) << 4) | ((g) << 2) | (r))
+// Palette. The framebuffer holds 4-bit indices; while the menu is up the
+// 16 palette entries are these colours instead of the Apple's, loaded on
+// the first repaint after Open(). AppleVideo puts its own back on Close().
+enum
+{
+	C_BLACK, C_BG, C_BARBG, C_WHITE, C_GREY, C_DIM, C_CYAN, C_DIMCYAN,
+	C_GREEN, C_YELLOW, C_AMBER, C_ORANGE, C_RED, C_MAGENTA, C_BLUE
+};
 
-static const int C_BG      = RGB222(0, 0, 1);   // dark navy page field
-static const int C_BARBG   = RGB222(0, 0, 2);   // title / footer bar fill
-static const int C_BLACK   = RGB222(0, 0, 0);
-static const int C_WHITE   = RGB222(3, 3, 3);
-static const int C_GREY    = RGB222(2, 2, 2);
-static const int C_DIM     = RGB222(1, 1, 1);
-static const int C_CYAN    = RGB222(0, 3, 3);
-static const int C_DIMCYAN = RGB222(0, 2, 2);
-static const int C_GREEN   = RGB222(0, 3, 0);
-static const int C_YELLOW  = RGB222(3, 3, 0);
-static const int C_AMBER   = RGB222(3, 2, 0);
-static const int C_ORANGE  = RGB222(3, 1, 0);
-static const int C_RED     = RGB222(3, 0, 0);
-static const int C_MAGENTA = RGB222(3, 0, 3);
-static const int C_BLUE    = RGB222(1, 1, 3);
+// RGB222: levels 0-3 per channel, all the DAC has
+#define LVL(n) ((n) * 85)
+static const VGAColor supPalette[16] =
+{
+	{ LVL(0), LVL(0), LVL(0) },   // C_BLACK
+	{ LVL(0), LVL(0), LVL(1) },   // C_BG      dark navy page field
+	{ LVL(0), LVL(0), LVL(2) },   // C_BARBG   title / footer bar fill
+	{ LVL(3), LVL(3), LVL(3) },   // C_WHITE
+	{ LVL(2), LVL(2), LVL(2) },   // C_GREY
+	{ LVL(1), LVL(1), LVL(1) },   // C_DIM
+	{ LVL(0), LVL(3), LVL(3) },   // C_CYAN
+	{ LVL(0), LVL(2), LVL(2) },   // C_DIMCYAN
+	{ LVL(0), LVL(3), LVL(0) },   // C_GREEN
+	{ LVL(3), LVL(3), LVL(0) },   // C_YELLOW
+	{ LVL(3), LVL(2), LVL(0) },   // C_AMBER
+	{ LVL(3), LVL(1), LVL(0) },   // C_ORANGE
+	{ LVL(3), LVL(0), LVL(0) },   // C_RED
+	{ LVL(3), LVL(0), LVL(3) },   // C_MAGENTA
+	{ LVL(1), LVL(1), LVL(3) },   // C_BLUE
+	{ LVL(0), LVL(0), LVL(0) },   // unused
+};
+#undef LVL
 
 // Apple logo stripe order, used for the rule under the title and the
 // accent band down the right margin.
 static const int stripe[6] = { C_GREEN, C_YELLOW, C_ORANGE,
                                C_RED,   C_MAGENTA, C_BLUE };
 
-// The 40x24 text grid is 280x192; the framebuffer is 320x200. Centring the
-// grid leaves a 20px margin either side and 4px top and bottom for chrome.
-#define SUP_ORIGIN_X 20
+// The 40x24 text grid is drawn at double width, 560x192 on the 640x200
+// framebuffer: a 40px margin either side and 4px top and bottom for chrome.
+#define SUP_ORIGIN_X 40
 #define SUP_ORIGIN_Y 4
+#define SUP_CELL_W   (FONT_X * 2)
 
-static inline int ColX(int col) { return SUP_ORIGIN_X + col * FONT_X; }
+static inline int ColX(int col) { return SUP_ORIGIN_X + col * SUP_CELL_W; }
 static inline int RowY(int row) { return SUP_ORIGIN_Y + row * FONT_Y; }
 
 Supervisor::Supervisor(Apple2Machine* m)
@@ -66,6 +79,7 @@ Supervisor::Supervisor(Apple2Machine* m)
 	machine = m;
 	vga = NULL;
 	dirty = true;
+	paletteSet = false;
 	font.Create();
 	active = false;
 	mode = BROWSE;
@@ -86,6 +100,7 @@ void Supervisor::Open()
 {
 	active = true;
 	dirty = true;
+	paletteSet = false;
 	mode = BROWSE;
 	SetStatus("");
 	ScanDir();
@@ -146,8 +161,8 @@ void Supervisor::DrawBar(int row, const char* text, int fg, int bg)
 {
 	int y   = RowY(row);
 	int top = (row == 0) ? 0 : y;
-	int bot = (row == SCREENTEXT_Y - 1) ? 200 : y + FONT_Y;
-	vga->fillRect(0, top, 320, bot - top, bg);
+	int bot = (row == SCREENTEXT_Y - 1) ? VGA_HEIGHT : y + FONT_Y;
+	vga->fillRect(0, top, VGA_WIDTH, bot - top, bg);
 	DrawRow(row, text, fg, bg);
 }
 
@@ -158,8 +173,8 @@ void Supervisor::DrawRule(int row)
 	int y = RowY(row) + 2;
 	for (int i = 0; i < 6; i++)
 	{
-		int x0 = (320 * i) / 6;
-		int x1 = (320 * (i + 1)) / 6;
+		int x0 = (VGA_WIDTH * i) / 6;
+		int x1 = (VGA_WIDTH * (i + 1)) / 6;
 		vga->fillRect(x0, y, x1 - x0, 3, stripe[i]);
 	}
 }
@@ -173,7 +188,7 @@ void Supervisor::DrawChrome()
 	int bottom = RowY(SUP_LIST_TOP + SUP_LIST_ROWS);
 	int band   = (bottom - top) / 6;
 	for (int i = 0; i < 6; i++)
-		vga->fillRect(306, top + i * band, 8, band, stripe[i]);
+		vga->fillRect(612, top + i * band, 16, band, stripe[i]);
 }
 
 // Colour for one list row. The selection bar is a swapped fg/bg pair rather
@@ -258,6 +273,14 @@ void Supervisor::Render(VGA* vgaOut)
 	vga = vgaOut;
 	if (vga == NULL)
 		return;
+
+	// The framebuffer holds palette indices: switch to the menu's colours
+	// before painting with them.
+	if (!paletteSet)
+	{
+		vga->setPalette(supPalette);
+		paletteSet = true;
+	}
 
 	// The menu is painted straight into the live framebuffer, so clearing and
 	// repainting it every frame is visible as flicker. Nothing else draws

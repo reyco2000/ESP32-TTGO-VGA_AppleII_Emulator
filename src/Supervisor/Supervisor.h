@@ -58,6 +58,7 @@ private:
 
 	bool active;
 	bool dirty;                  // menu needs repainting (set on every keypress)
+	bool paletteSet;             // supPalette loaded since Open()
 	Mode mode;
 
 	char curPath[SUP_PATH_LEN];
@@ -85,9 +86,8 @@ private:
 
 	void SetStatus(const char* msg);
 
-	// Drawing. fg/bg are packed RGB222 values from the palette in
-	// Supervisor.cpp; the selection bar is just a swapped pair, so the
-	// font's inverse glyph table is no longer needed here.
+	// Drawing. fg/bg are indices into the menu's palette in Supervisor.cpp;
+	// the selection bar is just a swapped pair.
 	void DrawText(int col, int row, const char* text, int fg, int bg);
 	void DrawRow(int row, const char* text, int fg, int bg);
 	void DrawBar(int row, const char* text, int fg, int bg);
