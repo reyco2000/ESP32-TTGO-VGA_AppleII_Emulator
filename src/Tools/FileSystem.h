@@ -32,9 +32,26 @@ public :
         SD.end();
     }
 
-    int ReadFile(const char *path, unsigned char *buffer, int len)
+    // SD.open with one more try. Opens from the emulation task have been
+    // seen to fail now and then (a ROM reported missing, a disk image not
+    // mounting) with no cause found yet; a second try is logged when it
+    // succeeds, so it shows up if it keeps happening.
+    static File Open(const char *path)
     {
         File file = SD.open(path);
+        if (!file)
+        {
+            delay(5);
+            file = SD.open(path);
+            if (file)
+                Serial.printf("[sd] %s opened on the second try\n", path);
+        }
+        return file;
+    }
+
+    int ReadFile(const char *path, unsigned char *buffer, int len)
+    {
+        File file = Open(path);
         if(!file)
         {
             Serial.printf("- failed to open file for reading: %s\n", path);

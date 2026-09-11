@@ -8,10 +8,10 @@
  * ============================================================
  *  File   : VGA.h
  *  Module : Hardware seam between the emulator and FabGL. Thin
- *           wrapper over the global fabgl::VGAController:
- *           dot()/row()/clear() pack RGB222 values straight into
- *           VGA scanline buffers, preserving the two sync bits in
- *           each byte and applying the required x^2 byte swizzle.
+ *           wrapper over the global fabgl::VGA16Controller: a
+ *           640x200 framebuffer of 4-bit palette indices, two
+ *           pixels per byte with the even x in the high nibble,
+ *           and the 16-entry palette that maps them to colours.
  * ============================================================
 */
 
@@ -19,8 +19,36 @@
 #define VGA_H
 
 #include "fabgl.h"
+#include <esp_heap_caps.h>
 
-extern fabgl::VGAController DisplayController;
+// VGA16Controller with its framebuffer pinned to internal RAM. Stock FabGL
+// already puts it there, but installs patched to use PSRAM exist (this
+// project's build machine has one). For the emulator PSRAM is the wrong
+// place: the ISR streams the framebuffer over the same bus the flash-resident
+// interpreter uses, and that cost ~20% of emulation speed. Overriding the
+// allocation makes the firmware behave the same on either library.
+class AppleVGAController : public fabgl::VGA16Controller
+{
+protected:
+	void allocateViewPort() override
+	{
+		// 4 bits per pixel: a row is half the width in bytes
+		VGABaseController::allocateViewPort(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL, getViewPortWidth() / 2);
+		for (int i = 0; i < VGA16_LinesCount; ++i)
+			m_lines[i] = (uint8_t*) heap_caps_malloc(getViewPortWidth(), MALLOC_CAP_DMA);
+	}
+};
+
+extern AppleVGAController DisplayController;
+
+#define VGA_WIDTH   640
+#define VGA_HEIGHT  200
+
+// One palette entry, 8 bits per channel; the DAC keeps the top two bits.
+struct VGAColor
+{
+	uint8_t r, g, b;
+};
 
 class VGA
 {
@@ -39,64 +67,65 @@ public:
 	bool start() { return true; }
 	bool show() { return true; }
 
-	void dot(int x, int y, uint8_t r, uint8_t g, uint8_t b)
+	// All 16 entries. The framebuffer holds indices, so everything already
+	// on screen recolours from the next scanline on.
+	void setPalette(const VGAColor pal[16])
 	{
-		uint8_t *scanline = DisplayController.getScanline(y);
-		if (scanline && x >= 0 && x < 320) {
-			int targetX = x ^ 2;
-			int rgbVal = ((b >> 6) << 4) | ((g >> 6) << 2) | (r >> 6);
-			scanline[targetX] = (scanline[targetX] & 0xC0) | rgbVal;
-		}
+		for (int i = 0; i < 16; ++i)
+			DisplayController.setPaletteItem(i, fabgl::RGB888(pal[i].r, pal[i].g, pal[i].b));
 	}
 
-	void dot(int x, int y, int rgb)
-	{
-		uint8_t *scanline = DisplayController.getScanline(y);
-		if (scanline && x >= 0 && x < 320) {
-			int targetX = x ^ 2;
-			scanline[targetX] = (scanline[targetX] & 0xC0) | rgb;
-		}
-	}
-
-	// Scanline pointer for a whole row. Callers blitting a full frame should
-	// fetch this once per row instead of paying getScanline() per pixel.
+	// Packed scanline: byte x/2 holds pixel x (high nibble) and x+1 (low).
+	// Callers drawing many pixels fetch this once per row.
 	uint8_t *row(int y)
 	{
 		return DisplayController.getScanline(y);
 	}
 
-	int rgb(uint8_t r, uint8_t g, uint8_t b)
+	// Two identical pixels at an even x: one whole byte, no masking. Content
+	// drawn at double width (40-column text, lores, hires) uses only this.
+	static inline void pair(uint8_t *row, int x, int idx)
 	{
-		return ((b >> 6) << 4) | ((g >> 6) << 2) | (r >> 6);
+		row[x >> 1] = (idx << 4) | idx;
 	}
 
-	// Partial-row fill. clear() can memset because it covers whole rows;
-	// a sub-row span has to honour the x^2 byte order pixel by pixel.
-	void fillRect(int x, int y, int w, int h, int rgb)
+	static inline void put(uint8_t *row, int x, int idx)
+	{
+		uint8_t &b = row[x >> 1];
+		b = (x & 1) ? ((b & 0xF0) | idx) : ((b & 0x0F) | (idx << 4));
+	}
+
+	void dot(int x, int y, int idx)
+	{
+		if (x >= 0 && x < VGA_WIDTH && y >= 0 && y < VGA_HEIGHT)
+			put(row(y), x, idx);
+	}
+
+	void fillRect(int x, int y, int w, int h, int idx)
 	{
 		if (x < 0) { w += x; x = 0; }
 		if (y < 0) { h += y; y = 0; }
-		for (int yy = y; yy < y + h && yy < 200; ++yy) {
-			uint8_t *scanline = DisplayController.getScanline(yy);
-			if (!scanline)
-				continue;
-			for (int xx = x; xx < x + w && xx < 320; ++xx) {
-				int t = xx ^ 2;
-				scanline[t] = (scanline[t] & 0xC0) | rgb;
-			}
+		if (x + w > VGA_WIDTH)  w = VGA_WIDTH - x;
+		if (y + h > VGA_HEIGHT) h = VGA_HEIGHT - y;
+		if (w <= 0 || h <= 0)
+			return;
+		for (int yy = y; yy < y + h; ++yy) {
+			uint8_t *r = row(yy);
+			int xx = x, end = x + w;
+			// odd edges take half a byte; the middle is whole bytes
+			if (xx & 1)
+				put(r, xx++, idx);
+			if ((end & 1) && end > xx)
+				put(r, --end, idx);
+			if (end > xx)
+				memset(r + (xx >> 1), (idx << 4) | idx, (end - xx) >> 1);
 		}
 	}
 
-	void clear(int rgb = 0)
+	void clear(int idx = 0)
 	{
-		for (int y = 0; y < 200; ++y) {
-			uint8_t *scanline = DisplayController.getScanline(y);
-			if (scanline) {
-				uint8_t sync = scanline[0] & 0xC0;
-				uint8_t fillVal = sync | rgb;
-				memset(scanline, fillVal, 320);
-			}
-		}
+		for (int y = 0; y < VGA_HEIGHT; ++y)
+			memset(row(y), (idx << 4) | idx, VGA_WIDTH / 2);
 	}
 };
 

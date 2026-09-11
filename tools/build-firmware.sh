@@ -41,7 +41,10 @@ mkdir -p "$OUT_DIR"
 
 echo "==> Building ESP32-AppleII v$FW_VERSION"
 echo "==> Compiling ($FQBN)"
-arduino-cli compile --fqbn "$FQBN" --output-dir "$OUT_DIR" "$SKETCH_DIR"
+# --clean: the esp32 core copies the partition table into the cached build
+# folder and keeps using that copy, so a stale one would outlive any change
+# to the partition scheme. Releases always build from scratch.
+arduino-cli compile --clean --fqbn "$FQBN" --output-dir "$OUT_DIR" "$SKETCH_DIR"
 
 # esptool and boot_app0 ship with the installed esp32 core; resolve whatever
 # version is present rather than hard-coding one.

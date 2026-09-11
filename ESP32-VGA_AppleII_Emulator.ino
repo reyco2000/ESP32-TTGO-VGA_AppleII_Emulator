@@ -20,6 +20,8 @@
 #include <SD.h>
 #include "fabgl.h"
 #include "src/AppleII/Apple2Machine.h"
+#include "src/AppleII/RomLoader.h"
+#include "src/Tools/Settings.h"
 #include "src/VGA/VGA.h"
 #include "src/Tools/Log.h"
 #include "src/Supervisor/Supervisor.h"
@@ -27,7 +29,7 @@
 // Global pointer to keyboard for Apple2Device to read from
 fabgl::Keyboard *keyboard_ptr = nullptr;
 fabgl::PS2Controller PS2Controller;
-fabgl::VGAController DisplayController;
+AppleVGAController DisplayController;       // see src/VGA/VGA.h
 fabgl::Canvas Canvas(&DisplayController);
 
 VGA *vga;
@@ -65,6 +67,10 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels)
         file = root.openNextFile();
     }
 }
+
+static void EmulationTask(void*);
+// set when there was no internal RAM for EmulationTask's stack
+static bool emulationInLoop = false;
 
 void setup()
 {
@@ -106,7 +112,13 @@ void setup()
 
     // Initialize FabGL VGA controller
     DisplayController.begin();
-    DisplayController.setResolution(VGA_640x480_60Hz, 320, 200);
+    // 640x200 in 16 colours (from 64): wide enough for the IIe's 560-dot
+    // 80-column text and double hi-res. The mode is 640x240 line-doubled,
+    // i.e. standard 640x480@60Hz timing; 640x200@70Hz is not accepted by
+    // every monitor. FabGL centres the 200-line viewport in the 240 lines.
+    // At 4 bits per pixel the framebuffer is the same 64K of internal RAM
+    // the old 320x200 8-bit one took.
+    DisplayController.setResolution(VGA_640x240_60Hz, 640, 200);
 
     // Print VGA timing and resolution diagnostics
     Serial.println("\n=== FabGL Video Mode Diagnostics ===");
@@ -125,14 +137,64 @@ void setup()
     PS2Controller.begin(PS2Preset::KeyboardPort0);
     keyboard_ptr = PS2Controller.keyboard();
 
+    // Machine model from NVS. A model with no built-in ROM can only boot when
+    // its ROMs are on the card; otherwise fall back to the ][+ and say why.
+    const MachineProfile* profile = &GetMachineProfile(Settings::LoadMachine(MACHINE_APPLE2PLUS));
+    const char* bootNote = "";
+    const char* missing = RomLoader::FirstMissing(*profile);
+    if (missing)
+    {
+        Serial.printf("[rom] %s needs %s/%s - booting the ][+\n", profile->name, ROM_DIR, missing);
+        bootNote = "ROMS MISSING - BOOTED APPLE ][+";
+        profile = &GetMachineProfile(MACHINE_APPLE2PLUS);
+    }
+    Serial.printf("Machine: %s\n", profile->name);
+
     // Create objects
-    machine = new Apple2Machine();
+    machine = new Apple2Machine(*profile);
+    machine->bootNote = bootNote;
     vga = new VGA();
     vga->setCanvas(&Canvas);
 
     DEBUG_PRINTLN("===> INIT Machine");
     machine->InitMachine();
     supervisor = new Supervisor(machine);
+
+    // Disks that were mounted when the machine was switched: the switch
+    // restarts the ESP32, so mount them again, once, and boot from them.
+    bool remounted = false;
+    for (int drive = 0; drive < 2; drive++)
+    {
+        String path = Settings::LoadDisk(drive);
+        if (path.length() == 0)
+            continue;
+        Settings::SaveDisk(drive, "");
+        remounted |= machine->Mount(path.c_str(), drive);
+    }
+    if (remounted)
+        machine->Reset();
+
+    // a model that could not boot says why
+    if (bootNote[0])
+        supervisor->Open();
+
+    // VGA16Controller converts every scanline in an ISR pinned to core 1,
+    // where the Arduino loop runs; sharing that core cost the emulator about
+    // a third of its speed. Core 0 has nothing else to do (no WiFi or BT),
+    // so the emulator gets a task of its own there. The task never yields,
+    // so core 0's idle-task watchdog has to go. The stack is 8K, as the
+    // Arduino loop task that used to run all this had; it comes from
+    // internal RAM, of which a IIe leaves little.
+    Serial.printf("[mem] internal free %u, largest block %u\n",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    disableCore0WDT();
+    if (xTaskCreatePinnedToCore(EmulationTask, "emulation", 8192, NULL, 1, NULL, 0) != pdPASS)
+    {
+        // slower, sharing core 1 with the VGA interrupt, but running
+        Serial.println("[emu] no RAM for the emulation task: running in loop() on core 1");
+        emulationInLoop = true;
+    }
 }
 
 int frame = 0;
@@ -140,7 +202,9 @@ int fpscount = 0;
 unsigned long fpsMillis = 0;
 unsigned long heapCheckMillis = 0;
 
-void loop()
+// One video frame: emulate (or run the supervisor), render, count FPS.
+// Runs in EmulationTask on core 0, see setup().
+static void RunFrame()
 {
     if (supervisor->IsActive())
     {
@@ -180,4 +244,21 @@ void loop()
         machine->device.fpsValue = fpscount;
         fpscount = 0;
     }
+}
+
+static void EmulationTask(void*)
+{
+    for (;;)
+        RunFrame();
+}
+
+void loop()
+{
+    if (emulationInLoop)
+    {
+        RunFrame();
+        return;
+    }
+    // everything runs in EmulationTask; the Arduino loop task has no work
+    vTaskDelete(NULL);
 }

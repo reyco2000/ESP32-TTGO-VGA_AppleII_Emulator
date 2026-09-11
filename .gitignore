@@ -10,3 +10,5 @@ CLAUDE.md
 docs/superpowers/
 lib/
 include/
+tests/host/.cache/
+tests/host/build/

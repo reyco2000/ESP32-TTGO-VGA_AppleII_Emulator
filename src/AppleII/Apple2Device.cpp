@@ -7,12 +7,10 @@
  *   MIT License
  * ============================================================
  *  File   : Apple2Device.cpp
- *  Module : Apple II peripherals and video. Two Disk II drives
- *           backed by nibblized .nib images read from SD, PS/2
- *           keyboard and gamepad input, soft-switch handling, and
- *           text/lores/hires rendering written straight into the
- *           VGA framebuffer with per-cell dirty caches. Also draws
- *           the F2 FPS overlay.
+ *  Module : Apple II peripherals. Routes slot I/O to the cards
+ *           (Disk II: DiskIICard.cpp), PS/2 keyboard and gamepad
+ *           input, and the soft switches, including the video
+ *           mode flags AppleVideo renders from.
  * ============================================================
 */
 
@@ -27,64 +25,42 @@
 
 extern fabgl::Keyboard *keyboard_ptr;
 
+// Serial trace of every key event, of each character latched for the Apple
+// and of the program taking it: for chasing keyboard problems (layouts,
+// ordering). 0 silences it.
+#define KEY_TRACE 0
+
+#if KEY_TRACE
+static const char* KeyName(fabgl::VirtualKey vk)
+{
+#if FABGLIB_HAS_VirtualKeyO_STRING
+	return fabgl::Keyboard::virtualKeyToString(vk);
+#else
+	static char name[12];
+	snprintf(name, sizeof(name), "vk%d", (int)vk);
+	return name;
+#endif
+}
+
+static void TraceTaken(BYTE keyboard)
+{
+	if (keyboard & 0x80)
+		Serial.printf("[key] program took $%02X\n", keyboard & 0x7F);
+}
+#endif
+
 /////////////////////////////////////////////////////////////////////////// 
-
-const int offsetGR[24] = {                                                    // helper for TEXT and GR video generation
-  0x000, 0x080, 0x100, 0x180, 0x200, 0x280, 0x300, 0x380,                     // lines 0-7
-  0x028, 0x0A8, 0x128, 0x1A8, 0x228, 0x2A8, 0x328, 0x3A8,                     // lines 8-15
-  0x050, 0x0D0, 0x150, 0x1D0, 0x250, 0x2D0, 0x350, 0x3D0 };                    // lines 16-23
-
-
-const int offsetHGR[192] = {                                                  // helper for HGR video generation
-	0x0000, 0x0400, 0x0800, 0x0C00, 0x1000, 0x1400, 0x1800, 0x1C00,             // lines 0-7
-	0x0080, 0x0480, 0x0880, 0x0C80, 0x1080, 0x1480, 0x1880, 0x1C80,             // lines 8-15
-	0x0100, 0x0500, 0x0900, 0x0D00, 0x1100, 0x1500, 0x1900, 0x1D00,             // lines 16-23
-	0x0180, 0x0580, 0x0980, 0x0D80, 0x1180, 0x1580, 0x1980, 0x1D80,
-	0x0200, 0x0600, 0x0A00, 0x0E00, 0x1200, 0x1600, 0x1A00, 0x1E00,
-	0x0280, 0x0680, 0x0A80, 0x0E80, 0x1280, 0x1680, 0x1A80, 0x1E80,
-	0x0300, 0x0700, 0x0B00, 0x0F00, 0x1300, 0x1700, 0x1B00, 0x1F00,
-	0x0380, 0x0780, 0x0B80, 0x0F80, 0x1380, 0x1780, 0x1B80, 0x1F80,
-	0x0028, 0x0428, 0x0828, 0x0C28, 0x1028, 0x1428, 0x1828, 0x1C28,
-	0x00A8, 0x04A8, 0x08A8, 0x0CA8, 0x10A8, 0x14A8, 0x18A8, 0x1CA8,
-	0x0128, 0x0528, 0x0928, 0x0D28, 0x1128, 0x1528, 0x1928, 0x1D28,
-	0x01A8, 0x05A8, 0x09A8, 0x0DA8, 0x11A8, 0x15A8, 0x19A8, 0x1DA8,
-	0x0228, 0x0628, 0x0A28, 0x0E28, 0x1228, 0x1628, 0x1A28, 0x1E28,
-	0x02A8, 0x06A8, 0x0AA8, 0x0EA8, 0x12A8, 0x16A8, 0x1AA8, 0x1EA8,
-	0x0328, 0x0728, 0x0B28, 0x0F28, 0x1328, 0x1728, 0x1B28, 0x1F28,
-	0x03A8, 0x07A8, 0x0BA8, 0x0FA8, 0x13A8, 0x17A8, 0x1BA8, 0x1FA8,
-	0x0050, 0x0450, 0x0850, 0x0C50, 0x1050, 0x1450, 0x1850, 0x1C50,
-	0x00D0, 0x04D0, 0x08D0, 0x0CD0, 0x10D0, 0x14D0, 0x18D0, 0x1CD0,
-	0x0150, 0x0550, 0x0950, 0x0D50, 0x1150, 0x1550, 0x1950, 0x1D50,
-	0x01D0, 0x05D0, 0x09D0, 0x0DD0, 0x11D0, 0x15D0, 0x19D0, 0x1DD0,
-	0x0250, 0x0650, 0x0A50, 0x0E50, 0x1250, 0x1650, 0x1A50, 0x1E50,
-	0x02D0, 0x06D0, 0x0AD0, 0x0ED0, 0x12D0, 0x16D0, 0x1AD0, 0x1ED0,             // lines 168-183
-	0x0350, 0x0750, 0x0B50, 0x0F50, 0x1350, 0x1750, 0x1B50, 0x1F50,             // lines 176-183
-	0x03D0, 0x07D0, 0x0BD0, 0x0FD0, 0x13D0, 0x17D0, 0x1BD0, 0x1FD0 };            // lines 184-191
-
-
-const int color[16][3] = {                                                    // the 16 low res colors
-	{ 0,   0,   0	  }, { 226, 57,  86  }, { 28,  116, 205 }, { 126, 110, 173 },
-	{ 31,  129, 128 }, { 137, 130, 122 }, { 86,  168, 228 }, { 144, 178, 223 },
-	{ 151, 88,  34	}, { 234, 108, 21  }, { 158, 151, 143 }, { 255, 206, 240 },
-	{ 144, 192, 49	}, { 255, 253, 166 }, { 159, 210, 213 }, { 255, 255, 255 }
-};
-
-const int hcolor[16][3] = {                                                   // the high res colors (2 light levels)
-	{ 0,   0,   0   }, { 144, 192, 49  }, { 126, 110, 173 }, { 255, 255, 255 },
-	{ 0,   0,   0   }, { 234, 108, 21  }, { 86,  168, 228 }, { 255, 255, 255 },
-	{ 0,   0,   0   }, { 63,  55,	 86  }, { 72,  96,  25	}, { 255, 255, 255 },
-	{ 0,   0,   0   }, { 43,  84,	 114 }, { 117, 54,  10	}, { 255, 255, 255 }
-};
-
 
 Apple2Device::Apple2Device()
 {
 	DEBUG_PRINTLN("Construct Apple2Device");
-	vga = NULL;
 	// host-side overlay state: deliberately not in Reset(), an emulated
 	// machine reset must not switch the user's FPS display off
 	fpsOverlay = false;
 	fpsValue = 0;
+	iie = false;
+	for (int slot = 0; slot < 8; slot++)
+		slots[slot] = NULL;
 	Reset();
 }
 
@@ -95,7 +71,7 @@ Apple2Device::~Apple2Device()
 void Apple2Device::Create(CPU* cpu)
 {
 	this->cpu = cpu;
-	font.Create();
+	video.Create();
 	zoomscale = 3;
 
 	// No screen backbuffer: Render() draws into the VGA framebuffer directly.
@@ -113,21 +89,18 @@ void Apple2Device::Reset()
 	colorMonitor = true;
 	keyboard = 0;
 	supervisorRequested = false;
+	resetRequested = false;
+	lastVK = 0;
+	keyHead = 0;
+	keyCount = 0;
+	col80 = false;
+	altCharset = false;
+	dhires = false;
 
-	pixelGR = { 0, 0, 7, 4 };
-
-	// DISK ][
-	updatedrive = 0;
-	currentDrive = 0;
-	// I/O register
-	dLatch = 0;
-
-	memset(phases, 0, sizeof(phases));
-	memset(phasesB, 0, sizeof(phasesB));
-	memset(phasesBB, 0, sizeof(phasesBB));
-	memset(pIdx, 0, sizeof(pIdx));
-	memset(pIdxB, 0, sizeof(pIdxB));
-	memset(halfTrackPos, 0, sizeof(halfTrackPos));
+	// slot cards: controller state only, inserted disks stay
+	for (int slot = 1; slot < 8; slot++)
+		if (slots[slot])
+			slots[slot]->Reset();
 
 	////////////////////////////////////////////////////////////////////////// VIDEO
 
@@ -136,25 +109,34 @@ void Apple2Device::Reset()
 	videoPage = 1;
 	hires_Mode = false;
 
-	//videoAddress = videoPage * 0x0400;
-	memset(LoResCache, 0, sizeof(LoResCache));
-	memset(TextCache, 0xFF, sizeof(TextCache));
-	memset(HiResCache, 0, sizeof(HiResCache));
-	memset(previousBit, 0, sizeof(previousBit));
-	flashCycle = 0;
+	video.Reset();
 }
 
 
 BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 {
+	// $C090-$C0FF: the I/O registers of the cards in slots 1-7
+	if (address >= 0xC090 && address < 0xC100)
+	{
+		Card* card = slots[(address >> 4) & 7];
+		return card ? card->Io(address & 0x0F, value, WRT) : 0;
+	}
+
+	// IIe: $C000-$C01F are the MMU and video switches and their status
+	if (iie && address < 0xC020)
+		return IIeSwitch(mem, address, WRT);
+
 	switch (address) 
 	{
 		// KEYBOARD
 		case 0xC000: 
 			return(keyboard);
 		// KBDSTROBE
-		case 0xC010: 
-			keyboard &= 0x7F; 
+		case 0xC010:
+#if KEY_TRACE
+			TraceTaken(keyboard);
+#endif
+			keyboard &= 0x7F;
 			return(keyboard);
 
 		// TAPEOUT??
@@ -283,73 +265,25 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 			resetPaddles(); 
 			break;
 */
-		/////////////////////////////////////////////////////////////////////////////////	DISK 2
-
-		case 0xC0E0:
-		case 0xC0E1:
-		case 0xC0E2:
-		case 0xC0E3:
-		case 0xC0E4:
-		case 0xC0E5:
-		case 0xC0E6:
-		case 0xC0E7: 
-			stepMotor(address); 
-			break; // MOVE DRIVE HEAD
-
-		// MOTOR OFF
+		// $CFFF stops the drive motor, as the original emulator did (on real
+		// hardware it releases the slots' $C800 expansion ROMs)
 		case 0xCFFF:
-		case 0xC0E8: 
-			disk[currentDrive].motorOn = false; 
-			//printf("--> DISK MOTOR OFF\n");
+			disk6.MotorOff();
 			break;
 
-		// MOTOR ON
-		case 0xC0E9: 
-			disk[currentDrive].motorOn = true;  
-			//printf("--> DISK MOTOR ON\n");
+		// Pushbuttons 0 and 1: on the IIe these are the Open Apple and
+		// Solid Apple keys, here the PC's left and right Alt
+		case 0xC061:
+			return ButtonDown(0) ? 0x80 : 0;
+		case 0xC062:
+			return ButtonDown(1) ? 0x80 : 0;
+
+		// AN3: off ($C05E) gives double hires in 80-column mode
+		case 0xC05E:
+			dhires = true;
 			break;
-
-		// DRIVE 0
-		case 0xC0EA: 
-			setDrv(0); 
-			break;
-		// DRIVE 1
-		case 0xC0EB: 
-			setDrv(1); 
-			break;
-
-		// Shift Data Latch
-		case 0xC0EC:                                                                
-		{
-			int idx = disk[currentDrive].track * 0x1A00 + disk[currentDrive].nibble;
-			if (idx < 0 || idx >= DISKSIZE)
-			{
-				// head parked beyond the 35 tracks a .nib actually holds:
-				// leave the latch alone rather than running off the buffer
-			}
-			else if (disk[currentDrive].writeMode)
-				disk[currentDrive].data[idx] = dLatch;                                  // writing
-			else
-				dLatch = disk[currentDrive].data[idx];                                  // reading
-
-			// turn floppy of 1 nibble
-			disk[currentDrive].nibble = (disk[currentDrive].nibble + 1) % 0x1A00;
-		}
-		return(dLatch);
-
-		// Load Data Latch
-		case 0xC0ED: 
-			dLatch = value; 
-			break;
-
-		// latch for READ
-		case 0xC0EE:
-			disk[currentDrive].writeMode = false;
-			return(disk[currentDrive].readOnly ? 0x80 : 0);                                 // check protection
-
-		// latch for WRITE
-		case 0xC0EF: 
-			disk[currentDrive].writeMode = true; 
+		case 0xC05F:
+			dhires = false;
 			break;
 
 		///////////////////////////////////////////////////////////////////////////////// LANGUAGE CARD
@@ -418,390 +352,98 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 			break;       // LC1RW
 	}
 
-	return (cpu->tick % 256);
+	// With 80STORE on, PAGE2 (and HIRES) also choose main or aux memory for
+	// the display pages, so the MMU keeps a copy of both.
+	if (iie && (address & 0xFFFC) == 0xC054)
+	{
+		mem->page2 = (videoPage == 2);
+		mem->hires = hires_Mode;
+		if (mem->store80)
+			mem->Remap();
+	}
+
+	// any access to $C080-$C08F may have flipped Language Card banking
+	if ((address & 0xFFF0) == 0xC080)
+		mem->RemapLanguageCard();
+
+	// Unhandled switches and empty slots. Real hardware returns the floating
+	// bus (video data); this used to be cpu->tick % 256, but tick never
+	// advanced, so it was always 0. Now that tick runs, keep returning 0
+	// explicitly: a random bit 7 would read as unimplemented pushbuttons
+	// ($C061-$C063) being pressed.
+	return 0;
 }
 
-void Apple2Device::ClearScreen()
+// $C000-$C01F on the IIe. Writes to $C000-$C00F set the MMU and video
+// switches; reads of $C011-$C01F report one of them in bit 7 over the
+// keyboard code; $C010 clears the strobe and reports any key still down.
+BYTE Apple2Device::IIeSwitch(Memory* mem, WORD address, bool WRT)
 {
-	if (vga == NULL)
-		return;
-
-	const int black = vga->rgb(0, 0, 0);
-	for (int y = 0; y < SCREENSIZE_Y; y++)
+	if (address < 0xC010)
 	{
-		unsigned char* scanline = vga->row(y);
-		if (scanline == NULL)
-			continue;
-		for (int x = 0; x < SCREENSIZE_X; x++)
+		if (!WRT)
+			return keyboard;
+		bool on = address & 1;
+		switch (address & 0x0E)
 		{
-			int t = x ^ 2;
-			scanline[t] = (scanline[t] & 0xC0) | black;
+			case 0x00: mem->store80   = on; break;
+			case 0x02: mem->ramRd     = on; break;
+			case 0x04: mem->ramWrt    = on; break;
+			case 0x06: mem->intCxRom  = on; break;
+			case 0x08: mem->altZp     = on; break;
+			case 0x0A: mem->slotC3Rom = on; break;
+			case 0x0C: col80      = on; return 0;
+			case 0x0E: altCharset = on; return 0;
 		}
+		mem->Remap();
+		return 0;
 	}
-}
 
-void Apple2Device::DrawPoint(int x, int y, int r, int g, int b)
-{
-	AppleColor color(0,0,0);
-	if (colorMonitor)
+	if (WRT || address == 0xC010)
 	{
-		color.r = r; 
-		color.g = g; 
-		color.b = b; 
-		//color.a = 0xff;
+#if KEY_TRACE
+		TraceTaken(keyboard);
+#endif
+		keyboard &= 0x7F;               // any access to $C010, or a write to $C01x
+		if (WRT)
+			return 0;
+		return (AnyKeyDown() ? 0x80 : 0) | keyboard;
 	}
-	else
+
+	bool flag;
+	switch (address)
 	{
-		float grayscale = (0.299f * r) + (0.587f * g) + (0.114f * b);
-		color.r = 0; 
-		color.g = (BYTE)grayscale; 
-		color.b = 0;
-		//color.a = 0xff;
+		case 0xC011: flag = mem->LCBank2Enable; break;
+		case 0xC012: flag = mem->LCReadable;    break;
+		case 0xC013: flag = mem->ramRd;         break;
+		case 0xC014: flag = mem->ramWrt;        break;
+		case 0xC015: flag = mem->intCxRom;      break;
+		case 0xC016: flag = mem->altZp;         break;
+		case 0xC017: flag = mem->slotC3Rom;     break;
+		case 0xC018: flag = mem->store80;       break;
+		// RDVBLBAR: high while the beam draws the 192 visible lines, low
+		// during vertical blank (17030 cycles a frame, 12480 of them visible)
+		case 0xC019: flag = (cpu->CurrentTick() % 17030) < 12480; break;
+		case 0xC01A: flag = textMode;           break;
+		case 0xC01B: flag = mixedMode;          break;
+		case 0xC01C: flag = (videoPage == 2);   break;
+		case 0xC01D: flag = hires_Mode;         break;
+		case 0xC01E: flag = altCharset;         break;
+		default:     flag = col80;              break;   // $C01F
 	}
-
-	vga->dot(x, y, vga->rgb(color.r, color.g, color.b));
+	return (flag ? 0x80 : 0) | (keyboard & 0x7F);
 }
 
-void Apple2Device::DrawRect(_RECT rect, int r, int g, int b)
+// Is the key that produced the latched code still held?
+bool Apple2Device::AnyKeyDown()
 {
-	for (int y = 0; y < (int)rect.height; y++)
-		for (int x = 0; x < (int)rect.width; x++)
-		{
-			DrawPoint((int)rect.x + x, (int)rect.y + y, r, g, b);
-		}
+	return keyboard_ptr && lastVK != fabgl::VK_NONE &&
+	       keyboard_ptr->isVKDown((fabgl::VirtualKey)lastVK);
 }
 
-int Apple2Device::GetScreenMode()
+bool Apple2Device::ButtonDown(int button)
 {
-	if (mixedMode == false)
-	{
-		if (textMode == false && hires_Mode)
-			return HIRES_MODE;
-
-		if (textMode == false && hires_Mode == false)
-			return LORES_MODE;
-
-		if (textMode == true && hires_Mode == false)
-			return TEXT_MODE;
-	}
-	else
-	{
-		if (hires_Mode)
-			return HIRES_MIX_MODE;
-		else
-			return LORES_MIX_MODE;
-	}
-
-	return TEXT_MODE;
-}
-
-/*
-	TEXT 40x24 ( 7x8 Font )
-	LORES : 40x24 (MIX 40x20)
-	HIRES : 280×192 (MIX 280×160)
-	In MIX mode the bottom is TEXT ( 4 Line : 32 pixel )
-*/
-// F2 FPS overlay: 7 text cells in the top right corner ("999 FPS").
-// FPS_COL is where the glyphs go; hires caches at a 2-byte (14 pixel)
-// granularity, so the invalidated span starts one byte column earlier.
-#define FPS_COL			33
-#define FPS_LEN			7
-#define FPS_HIRES_COL	32
-
-void Apple2Device::InvalidateFpsOverlayRegion()
-{
-	for (int col = FPS_HIRES_COL; col < SCREENTEXT_X; col++)
-	{
-		if (col >= FPS_COL)
-		{
-			TextCache[0][col] = -1;
-			LoResCache[0][col] = -1;
-		}
-		for (int line = 0; line < FONT_Y; line++)
-		{
-			HiResCache[line][col] = -1;
-			previousBit[line][col] = 0;
-		}
-	}
-}
-
-void Apple2Device::RenderFpsOverlay()
-{
-	char text[FPS_LEN + 1];
-	int fps = fpsValue;
-	if (fps < 0)   fps = 0;
-	if (fps > 999) fps = 999;
-	snprintf(text, sizeof(text), "%3d FPS", fps);
-
-	// normal video; RenderFont paints the whole 7x8 cell, so the black
-	// background still covers whatever the emulator drew underneath
-	for (int i = 0; i < FPS_LEN; i++)
-		font.RenderFont(vga, (BYTE)text[i], (FPS_COL + i) * FONT_X, 0, false);
-}
-
-void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
-{
-	vga = vgaOut;
-	if (vga == NULL)
-		return;
-
-	// the overlay scribbles over cells the caches believe are up to date,
-	// so give them back to the emulator before it paints this frame
-	if (fpsOverlay)
-		InvalidateFpsOverlayRegion();
-
-	int screenmode = GetScreenMode();
-
-	// The address changes with the video page
-	// $400, $800, $2000, $4000
-	if (screenmode == LORES_MODE || screenmode == HIRES_MODE || 
-		screenmode == LORES_MIX_MODE || screenmode == HIRES_MIX_MODE)
-	{
-		// LoRes, low resolution
-		if (hires_Mode == false)
-		{
-			videoAddress = videoPage * 0x0400;
-			BYTE glyph;                                                            // 2 blocks in GR
-			BYTE colorIdx = 0;                                                     // to index the color arrays
-
-			// for each column
-			for (int col = 0; col < 40; col++) 
-			{
-				pixelGR.x = col * 7;
-				// In mix mode the bottom 4 lines are for text
-				for (int line = 0; line < (mixedMode ? 20 : 24); line++) 
-				{
-					pixelGR.y = line * 8;                                                 // first block
-
-					glyph = mem.ReadByte(videoAddress + offsetGR[line] + col);                         // read video memory
-
-					if (LoResCache[line][col] != glyph || !flashCycle) 
-					{
-						LoResCache[line][col] = glyph;
-
-						// first nibble(4bit) 1/2 Byte
-						colorIdx = glyph & 0x0F;
-						DrawRect(pixelGR, color[colorIdx][0], color[colorIdx][1], color[colorIdx][2]);
-
-						pixelGR.y += 4;                                                       // second block
-						colorIdx = (glyph & 0xF0) >> 4;                                       // second nibble
-						DrawRect(pixelGR, color[colorIdx][0], color[colorIdx][1], color[colorIdx][2]);
-					}
-				}
-			}
-		}
-		else
-		{
-			// highRes, high resolution
-			WORD word;
-			BYTE bits[16], bit, pbit, colorSet, even;
-			// PAGE is 1 or 2
-			videoAddress = videoPage * 0x2000;
-			BYTE colorIdx = 0;
-
-			// In mix mode the bottom 4 lines are for text
-			for (int line = 0; line < (mixedMode ? 160 : 192); line++)
-			{
-				// for every 7 horizontal dots
-				for (int col = 0; col < 40; col += 2) 
-				{
-					int x = col * 7;
-					even = 0;
-
-					word = (WORD)(mem.ReadByte((videoAddress + offsetHGR[line] + col + 1))) << 8;    // store the two next bytes into 'word'
-					word += mem.ReadByte(videoAddress + offsetHGR[line] + col);              // in reverse order
-
-					// check if this group of 7 dots need a redraw
-					if (HiResCache[line][col] != word || !flashCycle) 
-					{
-
-						for (bit = 0; bit < 16; bit++)                                        // store all bits 'word' into 'bits'
-							bits[bit] = (word >> bit) & 1;
-
-						colorSet = bits[7] * 4;                                             // select the right color set
-						pbit = previousBit[line][col];                                      // the bit value of the left dot
-						bit = 0;                                                            // starting at 1st bit of 1st byte
-
-						while (bit < 15) 
-						{                                                  // until we reach bit7 of 2nd byte
-							if (bit == 7) 
-							{                                                   // moving into the second byte
-								colorSet = bits[15] * 4;                                        // update the color set
-								bit++;                                                          // skip bit 7
-							}
-							colorIdx = even + colorSet + (bits[bit] << 1) + (pbit);
-
-							DrawPoint(x++, line, hcolor[colorIdx][0], hcolor[colorIdx][1], hcolor[colorIdx][2]);
-							pbit = bits[bit++];                                               // proceed to the next pixel
-							even = even ? 0 : 8;                                              // one pixel every two is darker
-						}
-
-						HiResCache[line][col] = word;                                       // update the video cache
-						if ((col < 37) && (previousBit[line][col + 2] != pbit)) {           // check color franging effect on the dot after
-							previousBit[line][col + 2] = pbit;                                // set pbit and clear the
-							HiResCache[line][col + 2] = -1;                                   // video cache for next dot
-						}
-					}                                                                     // if (HiResCache[line][col] ...
-				}
-			}
-
-		}
-	}
-
-	// TEXT has to be drawn in both TEXT-only and Mixed modes
-	if (screenmode == TEXT_MODE || screenmode == LORES_MIX_MODE || screenmode == HIRES_MIX_MODE)
-	{
-// 		if(screenmode == TEXT_MODE)
-// 			ClearScreen();
-
-		videoAddress = videoPage * 0x0400;
-
-		// Text or Mixed
-		// Font size 7X8 / 40x20 characters
-		int linelimit = textMode ? 0 : 20;
-
-		for (int col = 0; col < SCREENTEXT_X; col++)
-		{
-			for (int line = linelimit; line < SCREENTEXT_Y; line++)
-			{
-				// read video memory
-				BYTE glyph = mem.ReadByte(videoAddress + offsetGR[line] + col);
-
-				int fontattr = 0;
-				if (glyph > 0x7F)
-					fontattr = FONT_NORMAL;
-				else if (glyph < 0x40)
-					fontattr = FONT_INVERSE;
-				else
-					fontattr = FONT_FLASH;
-
-				glyph &= 0x7F; // unset bit 7
-				if (glyph > 0x5F) glyph &= 0x3F; // shifts to match
-				if (glyph < 0x20) glyph |= 0x40; // the ASCII codes
-
-				bool inverse = !(fontattr == FONT_NORMAL || (fontattr == FONT_FLASH && frame < 15));
-
-				// only redraw a cell whose glyph or flash phase actually changed
-				int drawn = glyph | (inverse ? 0x100 : 0);
-				if (TextCache[line][col] != drawn || !flashCycle)
-				{
-					TextCache[line][col] = drawn;
-					font.RenderFont(vga, glyph, col * FONT_X, line * FONT_Y, inverse);
-				}
-			}
-		}
-	}
-
-
-	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/*
-	// Render Backbuffer
-	UnloadTexture(renderTexture);
-	renderTexture = LoadTextureFromImage(renderImage);
-
-	Vector2 pos;
- 	pos.x = 300;
- 	pos.y = 10;
-	DrawTextureEx(renderTexture, pos, 0, zoomscale, WHITE);
-
-	const int gap = 8;
-	Rectangle rec;
-	rec.x = pos.x - gap;
-	rec.y = pos.y - gap;
-	rec.width = (float)(SCREENSIZE_X * zoomscale + (gap * 2));
-	rec.height = (float)(SCREENSIZE_Y * zoomscale + (gap * 2));
-	DrawRectangleLinesEx(rec, 2, GRAY);
-*/
-	// drawn last: the overlay sits on top of the emulated screen
-	if (fpsOverlay)
-		RenderFpsOverlay();
-
-	if (++flashCycle == 30)
-		flashCycle = 0;
-
-}
-
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-// Apple Disk II 
-bool Apple2Device::InsertFloppy(const char* filename, int drv)
-{
-	int readlen = filesystem.ReadFile(filename, disk[drv].data, DISKSIZE);
-	if ( readlen != DISKSIZE)
-	{
-		Serial.printf("Read Floppy Fail : %s\n",filename);
-		return false;
-	}
-
-
-	Serial.printf("Read Floppy OK : %s\n",filename);
-	sprintf(disk[drv].filename, "%s", filename);
-
-	// For now, proceed in write-disabled mode
-	disk[drv].readOnly = false;	// read only
-	return true;
-}
-
-bool Apple2Device::Mount(const char* path, int drive)
-{
-	if (drive < 0 || drive > 1)
-		return false;
-	if (!InsertFloppy(path, drive))
-	{
-		// short/failed read clobbered the buffer - never leave it half-mounted
-		disk[drive].Reset();
-		return false;
-	}
-	return true;
-}
-
-void Apple2Device::Unmount(int drive)
-{
-	if (drive < 0 || drive > 1)
-		return;
-	disk[drive].Reset();
-}
-
-void Apple2Device::InvalidateRenderCache()
-{
-	memset(LoResCache, 0xFF, sizeof(LoResCache));
-	memset(TextCache, 0xFF, sizeof(TextCache));
-	memset(HiResCache, 0xFF, sizeof(HiResCache));
-	memset(previousBit, 0, sizeof(previousBit));
-}
-
-void Apple2Device::stepMotor(WORD address)
-{
-	address &= 7;
-	int phase = address >> 1;
-
-	phasesBB[currentDrive][pIdxB[currentDrive]] = phasesB[currentDrive][pIdxB[currentDrive]];
-	phasesB[currentDrive][pIdx[currentDrive]] = phases[currentDrive][pIdx[currentDrive]];
-	pIdxB[currentDrive] = pIdx[currentDrive];
-	pIdx[currentDrive] = phase;
-
-	if (!(address & 1)) 
-	{                                                         // head not moving (PHASE x OFF)
-		phases[currentDrive][phase] = false;
-		return;
-	}
-
-	if ((phasesBB[currentDrive][(phase + 1) & 3]) && (--halfTrackPos[currentDrive] < 0))      // head is moving in
-		halfTrackPos[currentDrive] = 0;
-
-	if ((phasesBB[currentDrive][(phase - 1) & 3]) && (++halfTrackPos[currentDrive] > 140))    // head is moving out
-		halfTrackPos[currentDrive] = 140;
-
-	phases[currentDrive][phase] = true;                                                 // update track#
-	disk[currentDrive].track = (halfTrackPos[currentDrive] + 1) / 2;
-}
-
-void Apple2Device::setDrv(int drv)
-{
-	disk[drv].motorOn = disk[!drv].motorOn || disk[drv].motorOn;                  // if any of the motors were ON
-	disk[!drv].motorOn = false;                                                   // motor of the other drive is set to OFF
-	currentDrive = drv;                                                                 // set the current drive
+	return keyboard_ptr && keyboard_ptr->isVKDown(button == 0 ? fabgl::VK_LALT : fabgl::VK_RALT);
 }
 
 
@@ -815,36 +457,6 @@ void Apple2Device::UpdateInput()
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
 
-// Floppy disk update
-bool Apple2Device::UpdateFloppyDisk()
-{
-	// Done once the floppy motor is off or updatedrive reaches 0
-	if (disk[currentDrive].motorOn && ++updatedrive)
-		return true;
-	else
-		return false;
-}
-
-void Apple2Device::InsetFloppy()
-{
-	//memset(&disk[0], 0, sizeof(FloppyDrive));
-	//memset(&disk[1], 0, sizeof(FloppyDrive));
-	disk[0].Reset();
-	disk[1].Reset();
-
-	Serial.printf("Insert Floppy");
-//	InsertFloppy("rom/DOS3.3.nib", 0);
-//	InsertFloppy("/loderunner.nib", 0);
-//	InsertFloppy("/karateka.nib", 0);
-//	InsertFloppy("/u4-1.nib", 0);
-
-}
-
-bool Apple2Device::GetDiskMotorState()
-{
-	return disk[currentDrive].motorOn;
-}
-
 static bool sound_state = false;
 void Apple2Device::PlaySound()
 {
@@ -857,57 +469,96 @@ void Apple2Device::PlaySound()
 
 void Apple2Device::UpdateKeyBoard()
 {
-    if (keyboard_ptr && keyboard_ptr->virtualKeyAvailable())
+    if (!keyboard_ptr)
+        return;
+
+    // Drain FabGL's queue every frame. Each event carries the character it
+    // made with the modifiers held at that moment: translating it later,
+    // with the modifiers as they are by then, turned a quickly typed "#3"
+    // into "3#". Characters then wait in keyQueue until the program has
+    // taken the previous one, so fast typing is neither reordered nor lost.
+    fabgl::VirtualKeyItem item;
+    while (keyboard_ptr->getNextVirtualKey(&item, 0))
     {
-        bool keyDown = false;
-        fabgl::VirtualKey vk = keyboard_ptr->getNextVirtualKey(&keyDown, 0);
-        if (vk != fabgl::VK_NONE && keyDown)
+#if KEY_TRACE
+        Serial.printf("[key] %s %-16s ascii=%02X shift=%d ctrl=%d lalt=%d ralt=%d caps=%d\n",
+                      item.down ? "down" : "up  ", KeyName(item.vk), item.ASCII,
+                      item.SHIFT, item.CTRL, item.LALT, item.RALT, item.CAPSLOCK);
+#endif
+        if (!item.down)
+            continue;
+        fabgl::VirtualKey vk = item.vk;
+
+        if (vk == fabgl::VK_F1)
         {
-            if (vk == fabgl::VK_F1)
+            // the supervisor reads the keyboard from here on
+            supervisorRequested = true;
+            return;
+        }
+        if (vk == fabgl::VK_F2)
+        {
+            fpsOverlay = !fpsOverlay;
+            // repaint what the overlay covered (or is about to cover)
+            InvalidateFpsOverlayRegion();
+            continue;
+        }
+        if (vk == fabgl::VK_F12 && item.CTRL)
+        {
+            // Ctrl-Reset; Ctrl+Alt+F12 is Open-Apple-Ctrl-Reset
+            resetRequested = true;
+            continue;
+        }
+
+        BYTE code = 0;
+        int ascii = item.ASCII;                   // 0: the key makes no character
+        if (ascii > 0 && ascii < 0x80)
+        {
+            // the ][+ keyboard has no lowercase: letters are capitals
+            // whatever Shift says, as Applesoft expects
+            if (!iie && ascii >= 'a' && ascii <= 'z')
+                ascii -= 'a' - 'A';
+            code = ascii;
+        }
+        else
+        {
+            switch (vk)
             {
-                supervisorRequested = true;
-                return;
-            }
-            if (vk == fabgl::VK_F2)
-            {
-                fpsOverlay = !fpsOverlay;
-                // repaint what the overlay covered (or is about to cover)
-                InvalidateFpsOverlayRegion();
-                return;
-            }
-            char ascii = keyboard_ptr->virtualKeyToASCII(vk);
-            if (ascii != 0)
-            {
-                if (keyboard_ptr->isVKDown(fabgl::VK_LCTRL) || keyboard_ptr->isVKDown(fabgl::VK_RCTRL))
-                {
-                    if (ascii >= 'a' && ascii <= 'z') {
-                        ascii = ascii - 'a' + 1;
-                    } else if (ascii >= 'A' && ascii <= 'Z') {
-                        ascii = ascii - 'A' + 1;
-                    }
-                }
-                keyboard = (BYTE)ascii | 0x80;
-            }
-            else
-            {
-                BYTE appleKey = 0;
-                switch (vk)
-                {
-                    case fabgl::VK_LEFT:   appleKey = 0x08; break;
-                    case fabgl::VK_RIGHT:  appleKey = 0x15; break;
-                    case fabgl::VK_UP:     appleKey = 0x0B; break;
-                    case fabgl::VK_DOWN:   appleKey = 0x0A; break;
-                    case fabgl::VK_ESCAPE: appleKey = 0x1B; break;
-                    case fabgl::VK_RETURN: appleKey = 0x0D; break;
-                    case fabgl::VK_BACKSPACE: appleKey = 0x08; break;
-                    default: break;
-                }
-                if (appleKey != 0)
-                {
-                    keyboard = appleKey | 0x80;
-                }
+                case fabgl::VK_LEFT:      code = 0x08; break;
+                case fabgl::VK_RIGHT:     code = 0x15; break;
+                case fabgl::VK_UP:        code = 0x0B; break;
+                case fabgl::VK_DOWN:      code = 0x0A; break;
+                case fabgl::VK_ESCAPE:    code = 0x1B; break;
+                case fabgl::VK_RETURN:    code = 0x0D; break;
+                case fabgl::VK_BACKSPACE: code = 0x08; break;
+                case fabgl::VK_DELETE:    code = 0x7F; break;
+                default: break;
             }
         }
+
+        if (code && keyCount < KEY_QUEUE_LEN)
+        {
+            int tail = (keyHead + keyCount) % KEY_QUEUE_LEN;
+            keyQueue[tail] = code;
+            keyQueueVK[tail] = vk;
+            keyCount++;
+        }
+#if KEY_TRACE
+        else if (code)
+            Serial.println("[key] type-ahead full, dropped");
+#endif
+    }
+
+    // latch the next character once the program has cleared the strobe
+    if (keyCount && !(keyboard & 0x80))
+    {
+#if KEY_TRACE
+        BYTE c = keyQueue[keyHead];
+        Serial.printf("[key] latched $%02X '%c'\n", c, (c >= 0x20 && c < 0x7F) ? c : '.');
+#endif
+        keyboard = keyQueue[keyHead] | 0x80;
+        lastVK = keyQueueVK[keyHead];
+        keyHead = (keyHead + 1) % KEY_QUEUE_LEN;
+        keyCount--;
     }
 }
 
@@ -915,11 +566,6 @@ void Apple2Device::UpdateKeyBoard()
 // game pad update
 void Apple2Device::UpdateGamepad()
 {
-}
-
-std::string Apple2Device::GetDiskName(int i)
-{
-	return disk[i].filename;
 }
 
 

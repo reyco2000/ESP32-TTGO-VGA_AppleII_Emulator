@@ -8,26 +8,31 @@
  * ============================================================
  *  File   : AppleMem.cpp
  *  Module : Apple II memory subsystem. Allocates the RAM / ROM /
- *           slot-6 / Language Card blocks in internal SRAM (never
- *           PSRAM), implements the segmented address map and
- *           Language Card banking, and routes $C000-$C0FF I/O page
- *           accesses to Apple2Device::SoftSwitch.
+ *           Language Card blocks (plus the IIe's auxiliary 64K) and
+ *           the page tables in internal SRAM (never PSRAM), rebuilds
+ *           the page tables on bank switches - Language Card and the
+ *           IIe MMU - maps slot and internal $Cxxx ROM, and routes
+ *           the I/O page to Apple2Device::SoftSwitch.
  * ============================================================
-*/
-
-
-/*
-	MOS 6502 CPU Emulator
 */
 
 #include "AppleMem.h"
 #include "../Tools/Log.h"
 #include <esp_heap_caps.h>
 
+// Writes to ROM land here and are never read back. A sink rather than a
+// NULL page keeps the write fast path free of any ROM check.
+static BYTE romSink[256];
+
 Memory::Memory()
 {
 	DEBUG_PRINTLN("Construct Memory");
 	device = NULL;
+	ram = rom = lgc = bk2 = NULL;
+	auxRam = auxLgc = auxBk2 = NULL;
+	readPage = writePage = NULL;
+	romSize = 0;
+	iie = false;
 }
 
 Memory::~Memory()
@@ -58,105 +63,210 @@ static BYTE* AllocFast(const char* name, size_t size)
 	return p;
 }
 
-void Memory::Create()
+void Memory::Create(int size, bool withIIe)
 {
+	romSize = size;
+	iie = withIIe;
+
 	// Allocated hottest-first so that if internal RAM runs short, the least
-	// frequently accessed blocks are the ones pushed out to PSRAM.
+	// frequently accessed blocks are the ones pushed out to PSRAM. The page
+	// tables are read on every single access; aux memory is used least.
+	readPage  = (BYTE**)AllocFast("rdpg", 256 * sizeof(BYTE*));
+	writePage = (BYTE**)AllocFast("wrpg", 256 * sizeof(BYTE*));
 	ram = AllocFast("ram", RAMSIZE);  // 48K of ram in $000-$BFFF
-	rom = AllocFast("rom", ROMSIZE);  // 12K of rom in $D000-$FFFF
+	rom = AllocFast("rom", romSize);  // 12K or 16K of system rom
 	lgc = AllocFast("lgc", LGCSIZE);
 	bk2 = AllocFast("bk2", BK2SIZE);
-	sl6 = AllocFast("sl6", SL6SIZE);
+	if (iie)
+	{
+		auxRam = AllocFast("aux", RAMSIZE);
+		auxLgc = AllocFast("alc", LGCSIZE);
+		auxBk2 = AllocFast("ab2", BK2SIZE);
+	}
 
 	Serial.printf("[mem] internal free after alloc: %u bytes\n",
 	              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 
+	memset(rom, 0, romSize);          // filled by Apple2Machine::LoadRoms
 	Reset();
 }
 
 void Memory::Destroy()
 {
+	free(readPage);
+	free(writePage);
 	free(ram);
 	free(rom);
 	free(lgc);
 	free(bk2);
-	free(sl6);
+	free(auxRam);
+	free(auxLgc);
+	free(auxBk2);
+	readPage = writePage = NULL;
+	ram = rom = lgc = bk2 = NULL;
+	auxRam = auxLgc = auxBk2 = NULL;
 }
 
 void Memory::Reset()
+{
+	// The system ROM is loaded once at boot and survives resets.
+	memset(ram, 0, RAMSIZE);
+	memset(lgc, 0, LGCSIZE);
+	memset(bk2, 0, BK2SIZE);
+	if (iie)
+	{
+		memset(auxRam, 0, RAMSIZE);
+		memset(auxLgc, 0, LGCSIZE);
+		memset(auxBk2, 0, BK2SIZE);
+	}
+	page2 = hires = false;
+
+	ResetSwitches();
+}
+
+void Memory::ResetSwitches()
 {
 	LCWritable = true;
 	LCReadable = false;
 	LCBank2Enable = true;
 	LCPreWriteFlipflop = false;
 
-	memset(ram, 0, RAMSIZE);
-	memset(rom, 0, ROMSIZE);
-	memset(lgc, 0, LGCSIZE);
-	memset(bk2, 0, BK2SIZE);
-	memset(sl6, 0, SL6SIZE);
+	store80 = ramRd = ramWrt = altZp = false;
+	intCxRom = slotC3Rom = intC8Rom = false;
+
+	Remap();
 }
 
-
-BYTE Memory::ReadByte(int address)
+void Memory::Remap()
 {
-#if 0
-	BYTE v = memory[address];
-	if (address == 0xCFFF || ((address & 0xFF00) == 0xC000))
-		v = device->SoftSwitch(address, 0, false);
-	return v;
-#else
-	if (address < RAMSIZE)
-		return ram[address];                                                        // RAM
-
-	if (address >= ROMSTART) {
-		if (!LCReadable)
-			return rom[address - ROMSTART];                                           // ROM
-
-		if (LCBank2Enable && (address < 0xE000))
-			return bk2[address - BK2START];                                           // BK2
-
-		return lgc[address - LGCSTART];                                             // LC
-	}
-
-	if ((address & 0xFF00) == SL6START)
-		return sl6[address - SL6START];  // disk][
-
-	if ((address & 0xF000) == 0xC000)
-		return (device->SoftSwitch(this, address, 0, false));
-
-	return 0;
-#endif
-}
-
-void Memory::WriteByte(int address, BYTE value)
-{
-#if 0
-
-	memory[address] = value;
-	if (address == 0xCFFF || ((address & 0xFF00) == 0xC000))
-		device->SoftSwitch(address, value, true);
-#else
-	if (address < RAMSIZE) {
-		ram[address] = value;                                                       // RAM
-		return;
-	}
-
-	if (LCWritable && (address >= ROMSTART)) {
-		if (LCBank2Enable && (address < 0xE000)) {
-			bk2[address - BK2START] = value;                                          // BK2
-			return;
+	// $0000-$BFFF: main or aux. ALTZP decides for page zero and the stack,
+	// RAMRD/RAMWRT for the rest, except that with 80STORE on PAGE2 picks the
+	// bank for the text page (and the hires page when HIRES is on).
+	for (int p = 0x00; p < 0xC0; p++)
+	{
+		bool rdAux, wrAux;
+		if (p < 0x02)
+			rdAux = wrAux = altZp;
+		else
+		{
+			rdAux = ramRd;
+			wrAux = ramWrt;
+			if (store80 && ((p >= 0x04 && p < 0x08) || (hires && p >= 0x20 && p < 0x40)))
+				rdAux = wrAux = page2;
 		}
-		lgc[address - LGCSTART] = value;                                            // LC
-		return;
+		readPage[p]  = (rdAux ? auxRam : ram) + (p << 8);
+		writePage[p] = (wrAux ? auxRam : ram) + (p << 8);
 	}
 
+	// $C000-$CFFF: soft switches and peripheral ROM. Pages mapped below read
+	// as plain memory; the rest take the slow path. Before the device is
+	// wired up (during Create) there are no cards yet.
+	for (int p = 0xC0; p < 0xD0; p++)
+		readPage[p] = writePage[p] = NULL;
+
+	for (int slot = 1; slot < 8; slot++)
+	{
+		BYTE* page = NULL;
+		bool internal = iie && (intCxRom || (slot == 3 && !slotC3Rom));
+		if (internal)
+		{
+			// the internal $C3xx ROM stays on the slow path until the first
+			// access to it has set INTC8ROM
+			if (slot != 3 || intCxRom || intC8Rom)
+				page = rom + (slot << 8);
+		}
+		else if (device && device->slots[slot])
+			page = device->slots[slot]->SlotRom();
+		readPage[0xC0 + slot] = page;
+	}
+
+	// IIe internal $C800-$CEFF. $CFxx always stays on the slow path: an
+	// access to $CFFF switches INTC8ROM off.
+	if (iie && (intCxRom || intC8Rom))
+		for (int p = 0xC8; p < 0xCF; p++)
+			readPage[p] = rom + ((p - 0xC0) << 8);
+
+	RemapLanguageCard();
+}
+
+// $D000-$FFFF reads ROM, or Language Card RAM when it is read-enabled; writes
+// reach the Language Card only when it is write-enabled. Bank 2 replaces bank
+// 1 in $D000-$DFFF. On the IIe, ALTZP puts the aux Language Card there.
+void Memory::RemapLanguageCard()
+{
+	BYTE* romD000 = rom + romSize - 0x3000;
+	BYTE* lcMain  = altZp ? auxLgc : lgc;
+	BYTE* lcBank2 = altZp ? auxBk2 : bk2;
+	for (int p = 0xD0; p < 0x100; p++)
+	{
+		int off = (p - 0xD0) << 8;
+		BYTE* lc = (LCBank2Enable && p < 0xE0) ? lcBank2 + off : lcMain + off;
+		readPage[p]  = LCReadable ? lc : romD000 + off;
+		writePage[p] = LCWritable ? lc : romSink;
+	}
+}
+
+// IIe $C100-$CFFF on the slow path: pages whose access changes which ROM is
+// visible ($C3xx sets INTC8ROM, $CFFF clears it), and pages with nothing
+// mapped. Writes only have the side effects.
+BYTE Memory::CxAccess(int address, BYTE value, bool write)
+{
+	int page = address >> 8;
+	if (address == 0xCFFF)
+	{
+		if (intC8Rom)
+		{
+			intC8Rom = false;
+			Remap();
+		}
+	}
+	else if (page == 0xC3 && !slotC3Rom && !intC8Rom)
+	{
+		intC8Rom = true;
+		Remap();
+	}
+
+	if (write)
+		return 0;
+
+	BYTE* p = readPage[page];
+	if (p)
+		return p[address & 0xFF];
+	bool internal = intCxRom || (page == 0xC3 && !slotC3Rom) || (page >= 0xC8 && intC8Rom);
+	return internal ? rom[address - 0xC000] : 0;
+}
+
+// The CPU's only way into memory. A NULL page means $C000-$CFFF: soft
+// switches and peripheral ROM, handled by the device (and on the IIe, the
+// $Cxxx ROM switching above). In IRAM because it runs for every emulated
+// memory access, and IRAM cannot miss the flash cache that the rest of the
+// interpreter competes for.
+BYTE IRAM_ATTR Memory::ReadByte(int address)
+{
+	BYTE* page = readPage[(address >> 8) & 0xFF];
+	if (page)
+		return page[address & 0xFF];
 	if ((address & 0xF000) == 0xC000)
 	{
-		device->SoftSwitch(this, address, value, true);
-		return;
+		if (iie && address >= 0xC100)
+			return CxAccess(address, 0, false);
+		return device->SoftSwitch(this, address, 0, false);
 	}
-#endif
+	return 0;
+}
+
+void IRAM_ATTR Memory::WriteByte(int address, BYTE value)
+{
+	BYTE* page = writePage[(address >> 8) & 0xFF];
+	if (page)
+		page[address & 0xFF] = value;
+	else if ((address & 0xF000) == 0xC000)
+	{
+		if (iie && address >= 0xC100)
+			CxAccess(address, value, true);
+		else
+			device->SoftSwitch(this, address, value, true);
+	}
 }
 
 WORD Memory::ReadWord(int addr)
@@ -167,10 +277,11 @@ WORD Memory::ReadWord(int addr)
 	return w;
 }
 
+// little-endian, the mirror of ReadWord
 void Memory::WriteWord(WORD value, int addr)
 {
-	WriteByte(addr, value >> 8);
-	WriteByte(addr + 1, value & 0xFF);
+	WriteByte(addr, value & 0xFF);
+	WriteByte(addr + 1, value >> 8);
 }
 
 

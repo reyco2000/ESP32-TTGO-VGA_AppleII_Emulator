@@ -7,9 +7,9 @@
  *   MIT License
  * ============================================================
  *  File   : Apple2Device.h
- *  Module : Apple II peripherals and video (interface).
- *           FloppyDrive state, soft-switch and video-mode flags,
- *           render caches and the FPS overlay API.
+ *  Module : Apple II peripherals (interface). Slot cards,
+ *           soft-switch and video-mode flags, the video renderer
+ *           and the FPS overlay state.
  * ============================================================
 */
 
@@ -18,48 +18,13 @@
 
 #include <stdio.h>
 #include <string>
-#include "AppleFont.h"
+#include "AppleVideo.h"
+#include "DiskIICard.h"
 #include "../Tools/Log.h"
-#include "../Tools/FileSystem.h"
 
 class CPU;	// 6502 cpu
 class Memory;
 class VGA;
-
-struct _RECT
-{
-	int x, y, width, height;
-};
-
-// two disk ][ drive units
-struct FloppyDrive
-{
-	char filename[400];
-	bool readOnly;
-	// nibblelized disk image
-	BYTE *data;
-	bool motorOn;
-	bool writeMode;
-	BYTE track;
-	WORD nibble;
-
-	FloppyDrive()
-	{
-		DEBUG_PRINTLN("Construct FloppyDrive");
-		data = (BYTE*)ps_malloc(DISKSIZE);
-	}
-
-	void Reset()
-	{
-		memset(data, 0, DISKSIZE);
-		memset(filename,0, 400);
-		readOnly = false;
-		motorOn = false;
-		writeMode = false;
-		track = 0;
-	 	nibble = 0;
-	}
-};
 
 
 // Apple II devices - everything except the CPU and memory
@@ -76,79 +41,55 @@ public:
 
 	//////////////////////////////////////////////////////////////////////////
 
-	// Current floppy disks (1,2)
-	int	currentDrive;
+	// Peripheral slots 1-7; [0] stays NULL (slot 0 is the Language Card,
+	// handled by SoftSwitch). Apple2Machine installs what its profile has.
+	Card* slots[8];
+	DiskIICard disk6;
 
 	//////////////////////////////////////////////////////////////////////////
 
+	// Video soft switches; AppleVideo renders from them
 	bool textMode;
 	bool mixedMode;
 	bool hires_Mode;
 	BYTE videoPage;
-	WORD videoAddress;
+	// IIe video switches
+	bool col80;                 // 80COL: 80-column text
+	bool altCharset;            // ALTCHARSET: MouseText and inverse lowercase
+	bool dhires;                // AN3 off ($C05E): double hires, with 80COL and HIRES
 
-	_RECT pixelGR;
+	AppleVideo video;
 
-	int LoResCache[24][40];
-	// text cells already drawn: glyph | 0x100 when drawn inverse, -1 = dirty.
-	// TEXT had no cache, so every frame redrew all 960 cells (53,760 pixels).
-	int TextCache[24][40];
-	int HiResCache[192][40];
-	BYTE previousBit[192][40];
-	BYTE flashCycle;
+	// The IIe MMU and I/O at $C000-$C01F. Set by Apple2Machine from the profile.
+	bool iie;
+	// Ctrl+F12: Apple2Machine pulls the RESET line before the next run
+	bool resetRequested;
 
 
 private:
 	CPU* cpu;
-	// Set for the duration of Render(); the drawing helpers below write
-	// straight into the VGA framebuffer, so there is no backbuffer.
-	VGA* vga;
-	//Texture2D renderTexture;
-	//Image renderImage;
-
-	AppleFont font;
 
 	// Keyboard input value
 	BYTE keyboard;
+	// the key behind the latched code, for the IIe's any-key-down at $C010
+	int lastVK;
 
-	////////////////////////////////////////////////
-
-	FloppyDrive disk[2];
-	BYTE updatedrive;
-
-	bool phases[2][4];
-	// phases states Before
-	bool phasesB[2][4];
-	// phases states Before Before
-	bool phasesBB[2][4];
-	// phase index (for both drives)
-	int pIdx[2];
-	// phase index Before
-	int pIdxB[2];
-	int halfTrackPos[2];
-	BYTE dLatch;
-
-	////////////////////////////////////////////////
-
-	FileSystem filesystem;
-
-	////////////////////////////////////////////////
-
-	// DISK2
-	bool InsertFloppy(const char* filename, int drv);
-	void stepMotor(WORD address);
-	void setDrv(int drv);
+	// Characters typed but not yet latched: the program has not taken the
+	// previous one (the strobe is still set).
+	static const int KEY_QUEUE_LEN = 16;
+	BYTE keyQueue[KEY_QUEUE_LEN];
+	int  keyQueueVK[KEY_QUEUE_LEN];
+	int  keyHead;
+	int  keyCount;
 
 	// Keyboard
 	void UpdateKeyBoard();
 	// GamePad
 	void UpdateGamepad();
 
-	void ClearScreen();
-	void RenderFpsOverlay();
-	void DrawPoint(int x, int y, int r, int g, int b);
-	void DrawRect(_RECT rect, int r, int g, int b);
-	int GetScreenMode();
+	BYTE IIeSwitch(Memory* mem, WORD address, bool WRT);
+	bool AnyKeyDown();
+	bool ButtonDown(int button);
 
 public:
 	Apple2Device();
@@ -156,9 +97,17 @@ public:
 
 	void Create(CPU* cpu);
 	void Reset();
-	bool HasFloppy(int drive) { return disk[drive].filename[0] != '\0'; }
 	void Dump(FILE* fp);
 	void LoadDump(FILE* fp);
+
+	// The Disk II in slot 6, for Apple2Machine and the supervisor
+	bool HasFloppy(int drive) { return disk6.HasFloppy(drive); }
+	bool Mount(const char* path, int drive) { return disk6.Mount(path, drive); }
+	void Unmount(int drive) { disk6.Unmount(drive); }
+	bool UpdateFloppyDisk() { return disk6.UpdateFloppyDisk(); }
+	void InsetFloppy() { disk6.EjectAll(); }
+	bool GetDiskMotorState() { return disk6.MotorOn(); }
+	std::string GetDiskName(int i) { return disk6.GetDiskName(i); }
 
 	// Supervisor menu support
 	bool supervisorRequested;
@@ -166,26 +115,14 @@ public:
 	// F2 FPS overlay: toggled from the keyboard, value fed in by the main loop
 	bool fpsOverlay;
 	int  fpsValue;
-	bool Mount(const char* path, int drive);
-	void Unmount(int drive);
-	void InvalidateRenderCache();
-	// marks only the cells under the FPS overlay dirty, so the emulator
-	// repaints them instead of trusting a cache the overlay has scribbled on
-	void InvalidateFpsOverlayRegion();
+	void InvalidateRenderCache() { video.InvalidateRenderCache(); }
+	void InvalidateFpsOverlayRegion() { video.InvalidateFpsOverlayRegion(); }
 
 	BYTE SoftSwitch(Memory* mem, WORD address, BYTE value, bool WRT);
 	void PlaySound();
-	void Render( Memory& mem, int frame, VGA* vga);
+	void Render(Memory& mem, int frame, VGA* vga) { video.Render(mem, *this, frame, vga); }
 
 	void UpdateInput();
-
-	bool UpdateFloppyDisk();
-	void InsetFloppy();
-
-	bool GetDiskMotorState();
-	std::string GetDiskName(int i);
-
-
 };
 
 

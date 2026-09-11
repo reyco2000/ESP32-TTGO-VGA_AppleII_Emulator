@@ -6,19 +6,10 @@
  *   Based on codesafe/ESP32-VGA_AppleII_Emulator , co-developed with Claude Code
  *   MIT License
  * ============================================================
- *  File   : Version.h
- *  Module : Single source of truth for the firmware version. The
- *           supervisor's ABOUT page displays it, and
- *           tools/build-firmware.sh parses FW_VERSION_STR out of
- *           this file to name the release image. Bump it here and
- *           nowhere else.
+ *  File   : SPI.h (host shim)
+ *  Module : Empty stand-in for the Arduino SPI library; the core's
+ *           headers include it but the host tests use no SPI.
  * ============================================================
 */
 
-#ifndef VERSION_H
-#define VERSION_H
-
-#define FW_VERSION_STR   "0.3.0"
-#define FW_BUILD_DATE    __DATE__
-
-#endif
+#pragma once
