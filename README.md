@@ -35,7 +35,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
   - **Apple ][+** — NMOS 6502, 48K plus a 16K Language Card. Its ROMs are built into the firmware.
   - **Apple //e (enhanced)** — 65C02, 128K with the auxiliary 64K, 80-column text, lowercase and MouseText. Needs its ROM files on the SD card (see [ROM files](#rom-files)).
 - 6502 and 65C02 CPU cores checked against Klaus Dormann's functional test suites, run on the build machine (`tests/host/run-cpu-tests.sh`)
-- Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not working yet — see TODO)
+- Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not yet verified — see TODO)
 - Two emulated Disk II drives with nibblized (`.nib`) disk images
 - **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount `.nib` images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with `[ MACHINE ]`, or open `[ ABOUT ]` for the firmware version and credits. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
@@ -190,6 +190,6 @@ If you're planning to dig in, start with [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 - [ ] CPU speed control — the main loop runs a fixed `17050 * 4` cycles per frame; make this selectable so the machine can run at 1 MHz or faster
 - [x] 80 column support
 - [x] Apple IIe support — IIe ROM, auxiliary memory bank, and the extra soft switches
-- [ ] Double hi-res — the renderer is written, but a test program that draws colour bars currently gives a black screen
+- [ ] Double hi-res — the renderer is written but not yet verified on screen
 - [ ] Keyboard layouts other than US, selectable from the F1 menu
 - [ ] Apple IIc and IIc Plus — the machine-profile and slot-card structure is meant to take them as new profiles
