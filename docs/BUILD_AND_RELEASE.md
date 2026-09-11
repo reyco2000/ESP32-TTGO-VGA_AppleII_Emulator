@@ -67,8 +67,8 @@ esp32 core give them.
 If you'd rather not use the script:
 
 ```bash
-# compile
-arduino-cli compile --fqbn "esp32:esp32:esp32:PSRAM=enabled,PartitionScheme=huge_app" \
+# compile (--clean: see the partition table note below)
+arduino-cli compile --clean --fqbn "esp32:esp32:esp32:PSRAM=enabled,PartitionScheme=huge_app" \
   --output-dir ./build .
 
 # merge (paths depend on the installed core version)
@@ -84,6 +84,19 @@ python3 ~/.arduino15/packages/esp32/tools/esptool_py/4.5.1/esptool.py \
 The FQBN options are load-bearing: `PSRAM=enabled` (FabGL needs it) and
 `PartitionScheme=huge_app` (the sketch does not fit the default 1.2 MB app
 partition scheme's headroom expectations used by this project).
+
+**There must be no `partitions.csv` in the sketch folder.** The esp32 core uses
+one instead of the `PartitionScheme` in the FQBN, and keeps a copy in the build
+cache that outlives the file — hence `--clean`. Releases up to 0.2.1 were built
+with such a table (a 928K app and no `nvs` partition, so settings could not be
+saved). From 0.3.0 the image uses the `huge_app` layout, so anyone upgrading
+from 0.2.x must flash the full merged image at `0x0`, not just the app. To check
+which table a build really produced:
+
+```bash
+python3 ~/.arduino15/packages/esp32/hardware/esp32/2.0.17/tools/gen_esp32part.py \
+  build/ESP32-VGA_AppleII_Emulator.ino.partitions.bin    # must list nvs at 0x9000
+```
 
 ## 2. Flash locally to test before publishing
 
@@ -150,8 +163,11 @@ Chrome-based browser — no toolchain needed.
 
 1. Bump `FW_VERSION_STR` in `src/Version.h`
 2. `tools/build-firmware.sh` — clean build, no warnings that matter
-3. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens (check
-   `[ ABOUT ]` reports the version you just bumped), F2 FPS toggles
-4. Commit and push the source
-5. Tag with the same version, push the tag, `gh release create` with the merged
+3. `tests/host/run-cpu-tests.sh` — both CPU suites must PASS
+4. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens (check
+   `[ ABOUT ]` reports the version you just bumped), F2 FPS toggles. With the
+   //e ROMs in `/roms`, switch to the //e in `[ MACHINE ]`: it must restart into
+   the "Apple //e" screen, and `PR#3` must give 80 columns; switch back to the ][+
+5. Commit and push the source
+6. Tag with the same version, push the tag, `gh release create` with the merged
    binary and `SHA256SUMS`
