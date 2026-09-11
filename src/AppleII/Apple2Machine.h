@@ -8,8 +8,9 @@
  * ============================================================
  *  File   : Apple2Machine.h
  *  Module : Top-level machine orchestrator (interface). Owns the
- *           CPU, Memory and Apple2Device instances and exposes
- *           InitMachine/Run/Reset/Mount/Unmount.
+ *           CPU, Memory and Apple2Device instances for one
+ *           MachineProfile and exposes InitMachine/Run/Reset/
+ *           Mount/Unmount.
  * ============================================================
 */
 
@@ -20,22 +21,28 @@
 #include "AppleCpu.h"
 #include "AppleMem.h"
 #include "Apple2Device.h"
+#include "MachineProfile.h"
 
 class VGA;
 
 class Apple2Machine
 {
 public:
+	const MachineProfile& profile;
 	CPU cpu;
 	Memory mem;
 	Apple2Device device;
 
+	// Why the model saved in NVS could not be booted, "" when it was.
+	// Set by setup(), shown by the supervisor.
+	const char* bootNote;
+
 private:
+	void LoadRoms();
 	bool Booting();
-	bool UploadRom();
 
 public:
-	Apple2Machine();
+	Apple2Machine(const MachineProfile& profile);
 	~Apple2Machine();
 
 	void InitMachine();

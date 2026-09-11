@@ -7,9 +7,9 @@
  *   MIT License
  * ============================================================
  *  File   : Apple2Device.cpp
- *  Module : Apple II peripherals and video. Two Disk II drives
- *           backed by nibblized .nib images read from SD, PS/2
- *           keyboard and gamepad input, soft-switch handling, and
+ *  Module : Apple II peripherals and video. Routes slot I/O to
+ *           the cards (Disk II: DiskIICard.cpp), PS/2 keyboard
+ *           and gamepad input, soft-switch handling, and
  *           text/lores/hires rendering written straight into the
  *           VGA framebuffer with per-cell dirty caches. Also draws
  *           the F2 FPS overlay.
@@ -85,6 +85,8 @@ Apple2Device::Apple2Device()
 	// machine reset must not switch the user's FPS display off
 	fpsOverlay = false;
 	fpsValue = 0;
+	for (int slot = 0; slot < 8; slot++)
+		slots[slot] = NULL;
 	Reset();
 }
 
@@ -116,18 +118,10 @@ void Apple2Device::Reset()
 
 	pixelGR = { 0, 0, 7, 4 };
 
-	// DISK ][
-	updatedrive = 0;
-	currentDrive = 0;
-	// I/O register
-	dLatch = 0;
-
-	memset(phases, 0, sizeof(phases));
-	memset(phasesB, 0, sizeof(phasesB));
-	memset(phasesBB, 0, sizeof(phasesBB));
-	memset(pIdx, 0, sizeof(pIdx));
-	memset(pIdxB, 0, sizeof(pIdxB));
-	memset(halfTrackPos, 0, sizeof(halfTrackPos));
+	// slot cards: controller state only, inserted disks stay
+	for (int slot = 1; slot < 8; slot++)
+		if (slots[slot])
+			slots[slot]->Reset();
 
 	////////////////////////////////////////////////////////////////////////// VIDEO
 
@@ -147,6 +141,13 @@ void Apple2Device::Reset()
 
 BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 {
+	// $C090-$C0FF: the I/O registers of the cards in slots 1-7
+	if (address >= 0xC090 && address < 0xC100)
+	{
+		Card* card = slots[(address >> 4) & 7];
+		return card ? card->Io(address & 0x0F, value, WRT) : 0;
+	}
+
 	switch (address) 
 	{
 		// KEYBOARD
@@ -283,73 +284,10 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 			resetPaddles(); 
 			break;
 */
-		/////////////////////////////////////////////////////////////////////////////////	DISK 2
-
-		case 0xC0E0:
-		case 0xC0E1:
-		case 0xC0E2:
-		case 0xC0E3:
-		case 0xC0E4:
-		case 0xC0E5:
-		case 0xC0E6:
-		case 0xC0E7: 
-			stepMotor(address); 
-			break; // MOVE DRIVE HEAD
-
-		// MOTOR OFF
+		// $CFFF stops the drive motor, as the original emulator did (on real
+		// hardware it releases the slots' $C800 expansion ROMs)
 		case 0xCFFF:
-		case 0xC0E8: 
-			disk[currentDrive].motorOn = false; 
-			//printf("--> DISK MOTOR OFF\n");
-			break;
-
-		// MOTOR ON
-		case 0xC0E9: 
-			disk[currentDrive].motorOn = true;  
-			//printf("--> DISK MOTOR ON\n");
-			break;
-
-		// DRIVE 0
-		case 0xC0EA: 
-			setDrv(0); 
-			break;
-		// DRIVE 1
-		case 0xC0EB: 
-			setDrv(1); 
-			break;
-
-		// Shift Data Latch
-		case 0xC0EC:                                                                
-		{
-			int idx = disk[currentDrive].track * 0x1A00 + disk[currentDrive].nibble;
-			if (idx < 0 || idx >= DISKSIZE)
-			{
-				// head parked beyond the 35 tracks a .nib actually holds:
-				// leave the latch alone rather than running off the buffer
-			}
-			else if (disk[currentDrive].writeMode)
-				disk[currentDrive].data[idx] = dLatch;                                  // writing
-			else
-				dLatch = disk[currentDrive].data[idx];                                  // reading
-
-			// turn floppy of 1 nibble
-			disk[currentDrive].nibble = (disk[currentDrive].nibble + 1) % 0x1A00;
-		}
-		return(dLatch);
-
-		// Load Data Latch
-		case 0xC0ED: 
-			dLatch = value; 
-			break;
-
-		// latch for READ
-		case 0xC0EE:
-			disk[currentDrive].writeMode = false;
-			return(disk[currentDrive].readOnly ? 0x80 : 0);                                 // check protection
-
-		// latch for WRITE
-		case 0xC0EF: 
-			disk[currentDrive].writeMode = true; 
+			disk6.MotorOff();
 			break;
 
 		///////////////////////////////////////////////////////////////////////////////// LANGUAGE CARD
@@ -418,7 +356,16 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 			break;       // LC1RW
 	}
 
-	return (cpu->tick % 256);
+	// any access to $C080-$C08F may have flipped Language Card banking
+	if ((address & 0xFFF0) == 0xC080)
+		mem->RemapLanguageCard();
+
+	// Unhandled switches and empty slots. Real hardware returns the floating
+	// bus (video data); this used to be cpu->tick % 256, but tick never
+	// advanced, so it was always 0. Now that tick runs, keep returning 0
+	// explicitly: a random bit 7 would read as unimplemented pushbuttons
+	// ($C061-$C063) being pressed.
+	return 0;
 }
 
 void Apple2Device::ClearScreen()
@@ -724,45 +671,6 @@ void Apple2Device::Render(Memory &mem, int frame, VGA* vgaOut)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Apple Disk II 
-bool Apple2Device::InsertFloppy(const char* filename, int drv)
-{
-	int readlen = filesystem.ReadFile(filename, disk[drv].data, DISKSIZE);
-	if ( readlen != DISKSIZE)
-	{
-		Serial.printf("Read Floppy Fail : %s\n",filename);
-		return false;
-	}
-
-
-	Serial.printf("Read Floppy OK : %s\n",filename);
-	sprintf(disk[drv].filename, "%s", filename);
-
-	// For now, proceed in write-disabled mode
-	disk[drv].readOnly = false;	// read only
-	return true;
-}
-
-bool Apple2Device::Mount(const char* path, int drive)
-{
-	if (drive < 0 || drive > 1)
-		return false;
-	if (!InsertFloppy(path, drive))
-	{
-		// short/failed read clobbered the buffer - never leave it half-mounted
-		disk[drive].Reset();
-		return false;
-	}
-	return true;
-}
-
-void Apple2Device::Unmount(int drive)
-{
-	if (drive < 0 || drive > 1)
-		return;
-	disk[drive].Reset();
-}
-
 void Apple2Device::InvalidateRenderCache()
 {
 	memset(LoResCache, 0xFF, sizeof(LoResCache));
@@ -770,40 +678,6 @@ void Apple2Device::InvalidateRenderCache()
 	memset(HiResCache, 0xFF, sizeof(HiResCache));
 	memset(previousBit, 0, sizeof(previousBit));
 }
-
-void Apple2Device::stepMotor(WORD address)
-{
-	address &= 7;
-	int phase = address >> 1;
-
-	phasesBB[currentDrive][pIdxB[currentDrive]] = phasesB[currentDrive][pIdxB[currentDrive]];
-	phasesB[currentDrive][pIdx[currentDrive]] = phases[currentDrive][pIdx[currentDrive]];
-	pIdxB[currentDrive] = pIdx[currentDrive];
-	pIdx[currentDrive] = phase;
-
-	if (!(address & 1)) 
-	{                                                         // head not moving (PHASE x OFF)
-		phases[currentDrive][phase] = false;
-		return;
-	}
-
-	if ((phasesBB[currentDrive][(phase + 1) & 3]) && (--halfTrackPos[currentDrive] < 0))      // head is moving in
-		halfTrackPos[currentDrive] = 0;
-
-	if ((phasesBB[currentDrive][(phase - 1) & 3]) && (++halfTrackPos[currentDrive] > 140))    // head is moving out
-		halfTrackPos[currentDrive] = 140;
-
-	phases[currentDrive][phase] = true;                                                 // update track#
-	disk[currentDrive].track = (halfTrackPos[currentDrive] + 1) / 2;
-}
-
-void Apple2Device::setDrv(int drv)
-{
-	disk[drv].motorOn = disk[!drv].motorOn || disk[drv].motorOn;                  // if any of the motors were ON
-	disk[!drv].motorOn = false;                                                   // motor of the other drive is set to OFF
-	currentDrive = drv;                                                                 // set the current drive
-}
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////// Input
 
@@ -814,36 +688,6 @@ void Apple2Device::UpdateInput()
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
-
-// Floppy disk update
-bool Apple2Device::UpdateFloppyDisk()
-{
-	// Done once the floppy motor is off or updatedrive reaches 0
-	if (disk[currentDrive].motorOn && ++updatedrive)
-		return true;
-	else
-		return false;
-}
-
-void Apple2Device::InsetFloppy()
-{
-	//memset(&disk[0], 0, sizeof(FloppyDrive));
-	//memset(&disk[1], 0, sizeof(FloppyDrive));
-	disk[0].Reset();
-	disk[1].Reset();
-
-	Serial.printf("Insert Floppy");
-//	InsertFloppy("rom/DOS3.3.nib", 0);
-//	InsertFloppy("/loderunner.nib", 0);
-//	InsertFloppy("/karateka.nib", 0);
-//	InsertFloppy("/u4-1.nib", 0);
-
-}
-
-bool Apple2Device::GetDiskMotorState()
-{
-	return disk[currentDrive].motorOn;
-}
 
 static bool sound_state = false;
 void Apple2Device::PlaySound()
@@ -915,11 +759,6 @@ void Apple2Device::UpdateKeyBoard()
 // game pad update
 void Apple2Device::UpdateGamepad()
 {
-}
-
-std::string Apple2Device::GetDiskName(int i)
-{
-	return disk[i].filename;
 }
 
 

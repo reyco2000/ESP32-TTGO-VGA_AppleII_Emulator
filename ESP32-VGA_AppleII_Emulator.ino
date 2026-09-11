@@ -20,6 +20,8 @@
 #include <SD.h>
 #include "fabgl.h"
 #include "src/AppleII/Apple2Machine.h"
+#include "src/AppleII/RomLoader.h"
+#include "src/Tools/Settings.h"
 #include "src/VGA/VGA.h"
 #include "src/Tools/Log.h"
 #include "src/Supervisor/Supervisor.h"
@@ -125,8 +127,22 @@ void setup()
     PS2Controller.begin(PS2Preset::KeyboardPort0);
     keyboard_ptr = PS2Controller.keyboard();
 
+    // Machine model from NVS. A model with no built-in ROM can only boot when
+    // its ROMs are on the card; otherwise fall back to the ][+ and say why.
+    const MachineProfile* profile = &GetMachineProfile(Settings::LoadMachine(MACHINE_APPLE2PLUS));
+    const char* bootNote = "";
+    const char* missing = RomLoader::FirstMissing(*profile);
+    if (missing)
+    {
+        Serial.printf("[rom] %s needs %s/%s - booting the ][+\n", profile->name, ROM_DIR, missing);
+        bootNote = "ROMS MISSING - BOOTED APPLE ][+";
+        profile = &GetMachineProfile(MACHINE_APPLE2PLUS);
+    }
+    Serial.printf("Machine: %s\n", profile->name);
+
     // Create objects
-    machine = new Apple2Machine();
+    machine = new Apple2Machine(*profile);
+    machine->bootNote = bootNote;
     vga = new VGA();
     vga->setCanvas(&Canvas);
 

@@ -8,7 +8,7 @@
  * ============================================================
  *  File   : Apple2Device.h
  *  Module : Apple II peripherals and video (interface).
- *           FloppyDrive state, soft-switch and video-mode flags,
+ *           Slot cards, soft-switch and video-mode flags,
  *           render caches and the FPS overlay API.
  * ============================================================
 */
@@ -19,8 +19,8 @@
 #include <stdio.h>
 #include <string>
 #include "AppleFont.h"
+#include "DiskIICard.h"
 #include "../Tools/Log.h"
-#include "../Tools/FileSystem.h"
 
 class CPU;	// 6502 cpu
 class Memory;
@@ -29,36 +29,6 @@ class VGA;
 struct _RECT
 {
 	int x, y, width, height;
-};
-
-// two disk ][ drive units
-struct FloppyDrive
-{
-	char filename[400];
-	bool readOnly;
-	// nibblelized disk image
-	BYTE *data;
-	bool motorOn;
-	bool writeMode;
-	BYTE track;
-	WORD nibble;
-
-	FloppyDrive()
-	{
-		DEBUG_PRINTLN("Construct FloppyDrive");
-		data = (BYTE*)ps_malloc(DISKSIZE);
-	}
-
-	void Reset()
-	{
-		memset(data, 0, DISKSIZE);
-		memset(filename,0, 400);
-		readOnly = false;
-		motorOn = false;
-		writeMode = false;
-		track = 0;
-	 	nibble = 0;
-	}
 };
 
 
@@ -76,8 +46,10 @@ public:
 
 	//////////////////////////////////////////////////////////////////////////
 
-	// Current floppy disks (1,2)
-	int	currentDrive;
+	// Peripheral slots 1-7; [0] stays NULL (slot 0 is the Language Card,
+	// handled by SoftSwitch). Apple2Machine installs what its profile has.
+	Card* slots[8];
+	DiskIICard disk6;
 
 	//////////////////////////////////////////////////////////////////////////
 
@@ -111,34 +83,6 @@ private:
 	// Keyboard input value
 	BYTE keyboard;
 
-	////////////////////////////////////////////////
-
-	FloppyDrive disk[2];
-	BYTE updatedrive;
-
-	bool phases[2][4];
-	// phases states Before
-	bool phasesB[2][4];
-	// phases states Before Before
-	bool phasesBB[2][4];
-	// phase index (for both drives)
-	int pIdx[2];
-	// phase index Before
-	int pIdxB[2];
-	int halfTrackPos[2];
-	BYTE dLatch;
-
-	////////////////////////////////////////////////
-
-	FileSystem filesystem;
-
-	////////////////////////////////////////////////
-
-	// DISK2
-	bool InsertFloppy(const char* filename, int drv);
-	void stepMotor(WORD address);
-	void setDrv(int drv);
-
 	// Keyboard
 	void UpdateKeyBoard();
 	// GamePad
@@ -156,9 +100,17 @@ public:
 
 	void Create(CPU* cpu);
 	void Reset();
-	bool HasFloppy(int drive) { return disk[drive].filename[0] != '\0'; }
 	void Dump(FILE* fp);
 	void LoadDump(FILE* fp);
+
+	// The Disk II in slot 6, for Apple2Machine and the supervisor
+	bool HasFloppy(int drive) { return disk6.HasFloppy(drive); }
+	bool Mount(const char* path, int drive) { return disk6.Mount(path, drive); }
+	void Unmount(int drive) { disk6.Unmount(drive); }
+	bool UpdateFloppyDisk() { return disk6.UpdateFloppyDisk(); }
+	void InsetFloppy() { disk6.EjectAll(); }
+	bool GetDiskMotorState() { return disk6.MotorOn(); }
+	std::string GetDiskName(int i) { return disk6.GetDiskName(i); }
 
 	// Supervisor menu support
 	bool supervisorRequested;
@@ -166,8 +118,6 @@ public:
 	// F2 FPS overlay: toggled from the keyboard, value fed in by the main loop
 	bool fpsOverlay;
 	int  fpsValue;
-	bool Mount(const char* path, int drive);
-	void Unmount(int drive);
 	void InvalidateRenderCache();
 	// marks only the cells under the FPS overlay dirty, so the emulator
 	// repaints them instead of trusting a cache the overlay has scribbled on
@@ -178,14 +128,6 @@ public:
 	void Render( Memory& mem, int frame, VGA* vga);
 
 	void UpdateInput();
-
-	bool UpdateFloppyDisk();
-	void InsetFloppy();
-
-	bool GetDiskMotorState();
-	std::string GetDiskName(int i);
-
-
 };
 
 

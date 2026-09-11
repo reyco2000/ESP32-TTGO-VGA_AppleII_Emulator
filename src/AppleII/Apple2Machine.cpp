@@ -8,8 +8,10 @@
  * ============================================================
  *  File   : Apple2Machine.cpp
  *  Module : Top-level machine orchestrator. Creates and wires CPU
- *           + Memory + Apple2Device, copies the embedded Apple II
- *           and Disk II ROM images into memory at boot, and drives
+ *           + Memory + Apple2Device and the slot cards for the
+ *           selected MachineProfile, loads the system and Disk II
+ *           ROMs from /roms on the SD card (falling back to the
+ *           built-in images where the model has them), and drives
  *           the per-frame cycle budget.
  * ============================================================
 */
@@ -17,12 +19,16 @@
 #include "Predef.h"
 #include "rombios.h"
 #include "Apple2Machine.h"
+#include "RomLoader.h"
 #include "../Tools/Log.h"
 #include "../VGA/VGA.h"
 
-Apple2Machine::Apple2Machine()
+Apple2Machine::Apple2Machine(const MachineProfile& p)
+	: profile(p), bootNote("")
 {
 	DEBUG_PRINTLN("Construct Apple2Machine");
+	cpu.cmos = (profile.cpu == CPU_65C02);
+	device.slots[6] = profile.diskIISlot6 ? &device.disk6 : NULL;
 }
 
 Apple2Machine::~Apple2Machine()
@@ -32,7 +38,8 @@ Apple2Machine::~Apple2Machine()
 
 void Apple2Machine::InitMachine()
 {
-	mem.Create();
+	mem.Create(profile.systemRomSize);
+	LoadRoms();
 	device.InsetFloppy();
 	// unset the Power-UP byte
 	mem.WriteByte(0x3F4, 0);
@@ -44,68 +51,38 @@ void Apple2Machine::InitMachine()
 	mem.device = &device;
 
 	Booting();
-	//UploadRom();	
 }
 
-// Embed the ROM
+// Once per power-up: the images stay in memory across resets. A file in
+// /roms wins over the built-in copy, so a user can supply their own dump.
+void Apple2Machine::LoadRoms()
+{
+	DEBUG_PRINTLN("Load ROMs");
+	if (RomLoader::Load(profile.systemRom, mem.rom, profile.systemRomSize) != ROM_OK)
+	{
+		// setup() only boots a model without a built-in image when its ROM
+		// is on the card, so in practice this is the ][+
+		if (profile.embeddedRom)
+		{
+			Serial.printf("[rom] using the built-in %s ROM\n", profile.name);
+			memcpy(mem.rom, appleIIrom, ROMSIZE);
+		}
+		else
+			Serial.printf("[rom] no system ROM for %s\n", profile.name);
+	}
+
+	if (RomLoader::Load(DISKII_ROM, device.disk6.rom, SL6SIZE) != ROM_OK)
+		memcpy(device.disk6.rom, diskII, SL6SIZE);
+}
+
 bool Apple2Machine::Booting()
 {
 	DEBUG_PRINTLN("====> BOOTING ...");
-	DEBUG_PRINTLN("Load Apple II Rom");
-	memcpy(mem.rom, appleIIrom, ROMSIZE);
-	if (device.HasFloppy(0) || device.HasFloppy(1))
-	{
-		DEBUG_PRINTLN("Load Disk II");
-		memcpy(mem.sl6, diskII, SL6SIZE);
-	}
-	else
-	{
-		DEBUG_PRINTLN("No floppy loaded, clearing Slot 6 ROM for direct BASIC boot");
-		memset(mem.sl6, 0, SL6SIZE);
-	}
+	// Maps the slot ROMs as the cards now present them. With no disk in
+	// either drive the Disk II hides its PROM, so the machine boots to BASIC.
+	mem.Remap();
 	cpu.Reset(mem);
 	return true;
-}
-
-// Load the ROM from a file
-bool Apple2Machine::UploadRom()
-{
-	bool ret = false;
-
-	// load the Apple II+ ROM
-	BYTE* rom =(BYTE*)ps_malloc(ROMSIZE);
-	FILE* fp = fopen("/apple2.rom", "rb"); 
-	if (fp)
-	{
-#if 0
-		fread(rom, ROMSIZE, 1, fp);
-		mem.UpLoadProgram(ROMSTART, rom, ROMSIZE);
-#else
-		fread(mem.rom, ROMSIZE, 1, fp);
-#endif
-		fclose(fp);
-		ret = true;
-	}
-	free(rom);
-
-	// load Apple II+ / Disk II
-	BYTE* disk2 = (BYTE*)ps_malloc(SL6SIZE);
-	FILE* disk2fp = fopen("rom/diskII.rom", "rb");
-	if (disk2fp)
-	{
-#if 0
-		fread(disk2, SL6SIZE, 1, disk2fp);
-		mem.UpLoadProgram(SL6START, disk2, SL6SIZE);
-#else
-		fread(mem.sl6, SL6SIZE, 1, disk2fp);
-#endif
-		fclose(disk2fp);
-		ret = true;
-	}
-	free(disk2);
-
-	cpu.Reset(mem);
-	return ret;
 }
 
 void Apple2Machine::Reset()
@@ -127,19 +104,18 @@ bool Apple2Machine::Mount(const char* path, int drive)
 {
 	if (!device.Mount(path, drive))
 		return false;
-	// machine may have booted disk-less with a cleared slot 6 ROM;
-	// PR#6 needs the Disk II PROM present
-	memcpy(mem.sl6, diskII, SL6SIZE);
+	// machine may have booted disk-less with the Disk II PROM hidden;
+	// PR#6 needs it present
+	mem.Remap();
 	return true;
 }
 
 void Apple2Machine::Unmount(int drive)
 {
 	device.Unmount(drive);
-	// no disk left: clear the PROM so a Reset boots to BASIC
+	// no disk left: the card hides its PROM, so a Reset boots to BASIC
 	// instead of hanging on an empty drive scan
-	if (!device.HasFloppy(0) && !device.HasFloppy(1))
-		memset(mem.sl6, 0, SL6SIZE);
+	mem.Remap();
 }
 
 void Apple2Machine::Run(long long cycle)
@@ -155,7 +131,7 @@ void Apple2Machine::Run(long long cycle)
 	cpu.Run(mem, cycle);
 	while (1)
 	{
-		if( device.UpdateFloppyDisk() == false ) 
+		if( device.UpdateFloppyDisk() == false )
 			break;
 		cpu.Run(mem, 1000);
 	}

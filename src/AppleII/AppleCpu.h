@@ -323,7 +323,31 @@ public:
 	// Skip the DOS 3.3 RWTS drive spin-up wait (see CPU::Run). Emulated
 	// drives are always up to speed, so the wait is pure wasted time.
 	bool fastDiskDelay;
+
+	// CPU variant, set from the machine profile. cmos selects 65C02 opcodes
+	// and behaviour (enhanced IIe, IIc). rockwell adds the Rockwell/WDC bit
+	// instructions (RMB/SMB/BBR/BBS); the IIe's 65C02 lacks them, so there
+	// those opcodes stay NOPs.
+	bool cmos;
+	bool rockwell;
+
+	// Emulated cycles since reset, including those already spent by a Run()
+	// call still in progress. Soft switches that depend on emulated time (the
+	// IIe VBL flag at $C019) use this rather than tick, which Run() only
+	// brings up to date when it returns.
+	long long CurrentTick() const
+	{
+		return runCycle ? runStartTick + (runBudget - *runCycle) : tick;
+	}
 	//std::string GetInstName(BYTE opcode);
+
+private:
+	// Run()'s live cycle budget. It already lives in memory because every
+	// helper takes it by reference, so exposing it costs nothing, where
+	// updating tick after every instruction measurably did.
+	long long* runCycle;
+	long long  runStartTick;
+	long long  runBudget;
 
 public:
 	CPU();
@@ -409,6 +433,14 @@ public:
 	void Execute_ROR(BYTE& v, long long& cycle);
 
 	void Execute_BRANCH(bool v, bool condition, Memory& mem, long long& cycle);
+
+	//////////////////////////////////////////////////////////////////////////	65C02
+
+	// 65C02-only opcodes (AppleCpu65C02.cpp). Returns false for an opcode
+	// the 65C02 does not define either.
+	bool ExecuteCmos(BYTE inst, Memory& mem, long long& cycle);
+	// (zp) : zero page indirect without an index
+	WORD addr_mode_ZPI(Memory& mem, long long& cycle);
 
 	//////////////////////////////////////////////////////////////////////////	Snapshot
 

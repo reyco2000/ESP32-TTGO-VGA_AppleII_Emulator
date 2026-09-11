@@ -9,7 +9,8 @@
  *  File   : AppleCpu.cpp
  *  Module : MOS 6502 CPU emulator. Instruction-level interpreter
  *           for the full instruction set; every memory access is
- *           routed through Memory. Also implements fastDiskDelay,
+ *           routed through Memory. 65C02-only opcodes live in
+ *           AppleCpu65C02.cpp. Also implements fastDiskDelay,
  *           which skips the DOS 3.3 RWTS drive spin-up wait loop
  *           at $BD9E after verifying its opcode signature.
  * ============================================================
@@ -29,6 +30,11 @@
 CPU::CPU()
 {
 	fastDiskDelay = true;
+	cmos = false;
+	rockwell = false;
+	runCycle = NULL;
+	runStartTick = 0;
+	runBudget = 0;
 	DEBUG_PRINTLN("Construct CPU");
 	tick = 0;
 	InitInstructionName();
@@ -308,6 +314,9 @@ int CPU::Run(Memory &mem, long long _cycle)
 {
 
 	long long cycle = _cycle;
+	runStartTick = tick;
+	runBudget = _cycle;
+	runCycle = &cycle;
 	while (cycle > 0)
 	{
 		long long prevcycle = cycle;
@@ -599,7 +608,8 @@ int CPU::Run(Memory &mem, long long _cycle)
 			{
 				// Get a WORD address from zero page and write the A register to (address + Y)
 				BYTE zp = Fetch(mem, cycle);
-				WORD addr = ReadWord(mem, zp, cycle);
+				// the pointer wraps within page zero
+				WORD addr = ReadByte(mem, zp, cycle) | (ReadByte(mem, (BYTE)(zp + 1), cycle) << 8);
 				addr += Y;
 				cycle--;
 				WriteByte(mem, A, addr, cycle);
@@ -690,11 +700,16 @@ int CPU::Run(Memory &mem, long long _cycle)
 			}
 			break;
 
-			case JMP_IND :	// 5 cycle
+			case JMP_IND :	// 5 cycle (6 on the 65C02)
 			{
-				WORD addr = FetchWord(mem, cycle);
-				addr = ReadWord(mem, addr, cycle);
-				PC = addr;
+				WORD ptr = FetchWord(mem, cycle);
+				// NMOS bug: a pointer at $xxFF takes its high byte from $xx00,
+				// not from the next page. The 65C02 fixed it.
+				WORD hiAddr = cmos ? (WORD)(ptr + 1)
+				                   : (WORD)((ptr & 0xFF00) | ((ptr + 1) & 0x00FF));
+				PC = ReadByte(mem, ptr, cycle) | (ReadByte(mem, hiAddr, cycle) << 8);
+				if (cmos)
+					cycle--;
 			}
 			break;
 
@@ -1775,7 +1790,8 @@ int CPU::Run(Memory &mem, long long _cycle)
 				WriteByte(mem, _PS | FLAG_BREAK, 0x100 + SP, cycle);
 				SP--;
 				Flag.I = 1;
-				Flag.D = 0;
+				if (cmos)
+					Flag.D = 0;       // only the 65C02 clears decimal mode on BRK
 				PC = ReadByte(mem, 0xFFFE, cycle) | ReadByte(mem, 0xFFFF, cycle) << 8;
 #endif
 				printf("BREAK!! : %x\n", PC);
@@ -1807,14 +1823,18 @@ int CPU::Run(Memory &mem, long long _cycle)
 			//////////////////////////////////////////////////////////////////////////////
 
 			default:
+				// every 65C02-only opcode is undocumented on the NMOS part
+				if (cmos && ExecuteCmos(inst, mem, cycle))
+					break;
 				printf("Unknown instruction : %x\n", inst);
 				//throw -1;
 				break;
 		}
-
-		//tick+= prevcycle-cycle;
 	}
 
+	// emulated time, once per call: see CurrentTick()
+	tick += _cycle - cycle;
+	runCycle = NULL;
 	return 0;//CyclesRequested - cycle;
 }
 
@@ -1920,7 +1940,8 @@ WORD CPU::addr_mode_INDX(Memory& mem, long long &cycle)
 	BYTE t = Fetch(mem, cycle);
 	BYTE inx = t + X;
 	cycle--;
-	WORD address = ReadWord(mem, inx, cycle);
+	// the pointer wraps within page zero: ($FF,X) with X=0 reads $FF and $00
+	WORD address = ReadByte(mem, inx, cycle) | (ReadByte(mem, (BYTE)(inx + 1), cycle) << 8);
 	return address;
 }
 
@@ -1932,7 +1953,7 @@ WORD CPU::addr_mode_INDY(Memory& mem, long long &cycle)
 	// If the address being read crosses a page, one cycle is deducted
 	BYTE addr = Fetch(mem, cycle);
 	BYTE lo = ReadByte(mem, addr, cycle);
-	BYTE hi = ReadByte(mem, addr + 1, cycle);
+	BYTE hi = ReadByte(mem, (BYTE)(addr + 1), cycle);   // wraps within page zero
 
 	WORD t = lo + Y;
 	if (t > 0xFF) cycle--;	// page boundary crossed
@@ -1952,47 +1973,70 @@ WORD CPU::addr_mode_INDY(Memory& mem, long long &cycle)
 #endif
 }
 
+// Add with carry. Binary mode is exact on both CPUs. Decimal mode follows
+// Bruce Clark's "Decimal Mode" (6502.org): A and C are right for valid BCD
+// on both parts. The NMOS 6502 leaves N/V describing an intermediate value
+// and Z the binary sum; the 65C02 makes N and Z reflect the BCD result.
 void CPU::Execute_ADC(BYTE v)
 {
-#if !USEOLD
-	BYTE oldA = A;
-	WORD Result = A + v + Flag.C;
-	// Decimal mode
-	if (Flag.D)
-		Result += ((((Result + 0x66) ^ A ^ v) >> 3) & 0x22) * 3;
-	A = (Result & 0xFF);
-	SetZeroNegative(A);
-	SetCarryFlag(Result);
- 	SetOverflow(oldA, A, v);
-#else
-	// Ignoring decimal mode makes Lode Runner display its score in hex
+	WORD bin = A + v + Flag.C;
+	if (!Flag.D)
+	{
+		Flag.V = ((A ^ bin) & (v ^ bin) & 0x80) != 0;
+		Flag.C = bin > 0xFF;
+		A = bin & 0xFF;
+		SetZeroNegative(A);
+		return;
+	}
 
-	WORD result = A + v + Flag.C;
-	Flag.V = ((result ^ A) & (result ^ v) & 0x0080) != 0;
-	if (Flag.D)
-		result += ((((result + 0x66) ^ A ^ v) >> 3) & 0x22) * 3;
-	Flag.C = result > 0xFF;
-	A = result & 0xFF;
-	SetZeroNegative(A);
-#endif
+	int lo = (A & 0x0F) + (v & 0x0F) + Flag.C;
+	if (lo >= 0x0A)
+		lo = ((lo + 0x06) & 0x0F) + 0x10;
+	int r = (A & 0xF0) + (v & 0xF0) + lo;
+	Flag.V = ((A ^ r) & (v ^ r) & 0x80) != 0;
+	Flag.N = (r & 0x80) != 0;
+	if (r >= 0xA0)
+		r += 0x60;
+	Flag.C = r >= 0x100;
+	A = r & 0xFF;
+	if (cmos)
+		SetZeroNegative(A);
+	else
+		Flag.Z = (bin & 0xFF) == 0;
 }
 
+// Subtract with borrow. C and V come from the binary difference on both
+// CPUs. It used to be ADC of the complement, which is only right in binary
+// mode: decimal SBC gave wrong BCD results. See Execute_ADC for the
+// decimal-mode flag differences between the NMOS 6502 and the 65C02.
 void CPU::Execute_SBC(BYTE v)
 {
-#if !USEOLD
-	Execute_ADC(~v);
-#else
-	v ^= 0xFF;
-	if (Flag.D)
-		v -= 0x0066;
-	WORD result = A + v + (Flag.C);
-	Flag.V = ((result ^ A) & (result ^ v) & 0x0080) != 0;
-	if (Flag.D)
-		result += ((((result + 0x66) ^ A ^ v) >> 3) & 0x22) * 3;
-	Flag.C = result > 0xFF;
-	A = result & 0xFF;
-	SetZeroNegative(A);
-#endif
+	int carryIn = Flag.C;                // read before C is overwritten below
+	BYTE nv = ~v;
+	WORD bin = A + nv + carryIn;
+	Flag.V = ((A ^ bin) & (nv ^ bin) & 0x80) != 0;
+	Flag.C = bin > 0xFF;
+	if (!Flag.D)
+	{
+		A = bin & 0xFF;
+		SetZeroNegative(A);
+		return;
+	}
+
+	int lo = (A & 0x0F) - (v & 0x0F) + carryIn - 1;
+	if (lo < 0)
+		lo = ((lo - 0x06) & 0x0F) - 0x10;
+	int r = (A & 0xF0) - (v & 0xF0) + lo;
+	if (r < 0)
+		r -= 0x60;
+	A = r & 0xFF;
+	if (cmos)
+		SetZeroNegative(A);
+	else
+	{
+		Flag.N = (bin & 0x80) != 0;
+		Flag.Z = (bin & 0xFF) == 0;
+	}
 }
 
 void CPU::Execute_CMP(BYTE v)
