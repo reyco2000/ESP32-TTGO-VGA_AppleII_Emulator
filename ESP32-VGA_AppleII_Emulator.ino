@@ -69,6 +69,8 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels)
 }
 
 static void EmulationTask(void*);
+// set when there was no internal RAM for EmulationTask's stack
+static bool emulationInLoop = false;
 
 void setup()
 {
@@ -158,13 +160,41 @@ void setup()
     machine->InitMachine();
     supervisor = new Supervisor(machine);
 
+    // Disks that were mounted when the machine was switched: the switch
+    // restarts the ESP32, so mount them again, once, and boot from them.
+    bool remounted = false;
+    for (int drive = 0; drive < 2; drive++)
+    {
+        String path = Settings::LoadDisk(drive);
+        if (path.length() == 0)
+            continue;
+        Settings::SaveDisk(drive, "");
+        remounted |= machine->Mount(path.c_str(), drive);
+    }
+    if (remounted)
+        machine->Reset();
+
+    // a model that could not boot says why
+    if (bootNote[0])
+        supervisor->Open();
+
     // VGA16Controller converts every scanline in an ISR pinned to core 1,
     // where the Arduino loop runs; sharing that core cost the emulator about
     // a third of its speed. Core 0 has nothing else to do (no WiFi or BT),
     // so the emulator gets a task of its own there. The task never yields,
-    // so core 0's idle-task watchdog has to go.
+    // so core 0's idle-task watchdog has to go. The stack is 8K, as the
+    // Arduino loop task that used to run all this had; it comes from
+    // internal RAM, of which a IIe leaves little.
+    Serial.printf("[mem] internal free %u, largest block %u\n",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     disableCore0WDT();
-    xTaskCreatePinnedToCore(EmulationTask, "emulation", 16384, NULL, 1, NULL, 0);
+    if (xTaskCreatePinnedToCore(EmulationTask, "emulation", 8192, NULL, 1, NULL, 0) != pdPASS)
+    {
+        // slower, sharing core 1 with the VGA interrupt, but running
+        Serial.println("[emu] no RAM for the emulation task: running in loop() on core 1");
+        emulationInLoop = true;
+    }
 }
 
 int frame = 0;
@@ -224,6 +254,11 @@ static void EmulationTask(void*)
 
 void loop()
 {
+    if (emulationInLoop)
+    {
+        RunFrame();
+        return;
+    }
     // everything runs in EmulationTask; the Arduino loop task has no work
     vTaskDelete(NULL);
 }

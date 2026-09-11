@@ -53,8 +53,17 @@ public:
 	bool mixedMode;
 	bool hires_Mode;
 	BYTE videoPage;
+	// IIe video switches
+	bool col80;                 // 80COL: 80-column text
+	bool altCharset;            // ALTCHARSET: MouseText and inverse lowercase
+	bool dhires;                // AN3 off ($C05E): double hires, with 80COL and HIRES
 
 	AppleVideo video;
+
+	// The IIe MMU and I/O at $C000-$C01F. Set by Apple2Machine from the profile.
+	bool iie;
+	// Ctrl+F12: Apple2Machine pulls the RESET line before the next run
+	bool resetRequested;
 
 
 private:
@@ -62,11 +71,25 @@ private:
 
 	// Keyboard input value
 	BYTE keyboard;
+	// the key behind the latched code, for the IIe's any-key-down at $C010
+	int lastVK;
+
+	// Characters typed but not yet latched: the program has not taken the
+	// previous one (the strobe is still set).
+	static const int KEY_QUEUE_LEN = 16;
+	BYTE keyQueue[KEY_QUEUE_LEN];
+	int  keyQueueVK[KEY_QUEUE_LEN];
+	int  keyHead;
+	int  keyCount;
 
 	// Keyboard
 	void UpdateKeyBoard();
 	// GamePad
 	void UpdateGamepad();
+
+	BYTE IIeSwitch(Memory* mem, WORD address, bool WRT);
+	bool AnyKeyDown();
+	bool ButtonDown(int button);
 
 public:
 	Apple2Device();

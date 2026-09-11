@@ -24,6 +24,8 @@
 #include "../AppleII/Apple2Machine.h"
 #include "../VGA/VGA.h"
 #include "../Version.h"
+#include "../AppleII/RomLoader.h"
+#include "../Tools/Settings.h"
 
 extern fabgl::Keyboard *keyboard_ptr;
 
@@ -90,6 +92,10 @@ Supervisor::Supervisor(Apple2Machine* m)
 	scroll = 0;
 	status[0] = '\0';
 	pickPath[0] = '\0';
+	machineCursor = 0;
+	for (int i = 0; i < MACHINE_COUNT; i++)
+		machineMissing[i] = NULL;
+	bootNoteShown = false;
 }
 
 Supervisor::~Supervisor()
@@ -103,6 +109,12 @@ void Supervisor::Open()
 	paletteSet = false;
 	mode = BROWSE;
 	SetStatus("");
+	// why the saved model could not boot, if it could not: said once
+	if (!bootNoteShown && machine->bootNote[0])
+	{
+		SetStatus(machine->bootNote);
+		bootNoteShown = true;
+	}
 	ScanDir();
 	if (sdError && !AtRoot())
 	{
@@ -241,6 +253,25 @@ void Supervisor::Update()
 			continue;
 		}
 
+		if (mode == PICK_MACHINE)
+		{
+			if (vk == fabgl::VK_UP && machineCursor > 0)
+				machineCursor--;
+			else if (vk == fabgl::VK_DOWN && machineCursor < MACHINE_COUNT - 1)
+				machineCursor++;
+			else if (vk == fabgl::VK_RETURN)
+				ChooseMachine(machineCursor);
+			else if (vk == fabgl::VK_ESCAPE)
+			{
+				SetStatus("");
+				mode = BROWSE;
+			}
+			continue;
+		}
+
+		if (mode == RESTARTING)
+			continue;
+
 		if (mode == PICK_DRIVE)
 		{
 			char ascii = keyboard_ptr->virtualKeyToASCII(vk);
@@ -291,6 +322,15 @@ void Supervisor::Render(VGA* vgaOut)
 
 	if (mode == ABOUT)
 		RenderAbout();
+	else if (mode == PICK_MACHINE)
+		RenderMachines();
+	else if (mode == RESTARTING)
+	{
+		// the choice is already in NVS; show it long enough to read
+		RenderRestarting();
+		delay(400);
+		ESP.restart();
+	}
 	else
 		RenderBrowse();
 }
@@ -344,14 +384,16 @@ void Supervisor::RenderAbout()
 	DrawRow(2, "        APPLE II EMULATOR FOR ESP32", C_WHITE, C_BG);
 	DrawRule(3);
 
-	DrawText(2, 5, "VERSION", C_YELLOW, C_BG);
-	DrawText(13, 5, FW_VERSION_STR, C_WHITE, C_BG);
-	DrawText(2, 6, "BUILT", C_YELLOW, C_BG);
-	DrawText(13, 6, FW_BUILD_DATE, C_WHITE, C_BG);
-	DrawText(2, 7, "DISPLAY", C_YELLOW, C_BG);
-	DrawText(13, 7, "320X200 VGA / 64 COLORS", C_WHITE, C_BG);
-	DrawText(2, 8, "CPU", C_YELLOW, C_BG);
-	DrawText(13, 8, "MOS 6502", C_WHITE, C_BG);
+	DrawText(2, 4, "MACHINE", C_YELLOW, C_BG);
+	DrawText(13, 4, machine->profile.name, C_WHITE, C_BG);
+	DrawText(2, 5, "CPU", C_YELLOW, C_BG);
+	DrawText(13, 5, machine->profile.cpu == CPU_65C02 ? "65C02" : "MOS 6502", C_WHITE, C_BG);
+	DrawText(2, 6, "DISPLAY", C_YELLOW, C_BG);
+	DrawText(13, 6, "640X200 VGA / 16 COLORS", C_WHITE, C_BG);
+	DrawText(2, 7, "VERSION", C_YELLOW, C_BG);
+	DrawText(13, 7, FW_VERSION_STR, C_WHITE, C_BG);
+	DrawText(2, 8, "BUILT", C_YELLOW, C_BG);
+	DrawText(13, 8, FW_BUILD_DATE, C_WHITE, C_BG);
 
 	DrawText(2, 10, "CREDITS", C_YELLOW, C_BG);
 	DrawText(2, 11, "REINALDO TORRES / COCO BYTE CLUB", C_WHITE, C_BG);
@@ -368,7 +410,7 @@ void Supervisor::RenderAbout()
 }
 
 //////////////////////////////////////////////////////////////////////////
-// Virtual list: [0]=reset [1]=unmount d1 [2]=unmount d2 [3]=about, then ".."
+// Virtual list: [0]=reset [1]=unmount d1 [2]=unmount d2 [3]=machine [4]=about, then ".."
 // when not at root, then the scanned entries
 
 int Supervisor::VirtualCount()
@@ -394,6 +436,11 @@ void Supervisor::VirtualLabel(int index, char* out, int outlen)
 		return;
 	}
 	if (index == 3)
+	{
+		snprintf(out, outlen, " [ MACHINE: %s ]", machine->profile.name);
+		return;
+	}
+	if (index == 4)
 	{
 		snprintf(out, outlen, " [ ABOUT ]");
 		return;
@@ -531,7 +578,12 @@ void Supervisor::Select()
 			SetStatus(drv == 0 ? "DRIVE 1 EMPTY" : "DRIVE 2 EMPTY");
 		return;
 	}
-	if (index == 3)                          // [ ABOUT ]
+	if (index == 3)                          // [ MACHINE: ... ]
+	{
+		OpenMachinePicker();
+		return;
+	}
+	if (index == 4)                          // [ ABOUT ]
 	{
 		mode = ABOUT;
 		return;
@@ -576,4 +628,85 @@ void Supervisor::MountTo(int drive)
 	}
 	else
 		SetStatus("LOAD FAILED");
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Machine picker. Switching model saves the choice and the mounted disks in
+// NVS and restarts the ESP32, so memory is laid out from scratch for the
+// new model; setup() mounts the disks again.
+
+void Supervisor::OpenMachinePicker()
+{
+	// a model whose ROMs are missing from /roms cannot be picked
+	for (int i = 0; i < MACHINE_COUNT; i++)
+		machineMissing[i] = RomLoader::FirstMissing(GetMachineProfile(i));
+	machineCursor = machine->profile.id;
+	SetStatus("");
+	mode = PICK_MACHINE;
+}
+
+void Supervisor::ChooseMachine(int id)
+{
+	if (id == machine->profile.id)
+	{
+		SetStatus("ALREADY RUNNING");
+		return;
+	}
+	if (machineMissing[id])
+	{
+		char msg[SCREENTEXT_X + 1];
+		snprintf(msg, sizeof(msg), "MISSING %s", machineMissing[id]);
+		SetStatus(msg);
+		return;
+	}
+
+	// restarting without the choice saved would only come back as this model
+	if (!Settings::SaveMachine(id))
+	{
+		SetStatus("CANNOT SAVE SETTINGS (NVS)");
+		return;
+	}
+	Settings::SaveDisk(0, machine->device.GetDiskName(0).c_str());
+	Settings::SaveDisk(1, machine->device.GetDiskName(1).c_str());
+	machineCursor = id;
+	mode = RESTARTING;                       // Render() shows it, then restarts
+}
+
+void Supervisor::RenderMachines()
+{
+	DrawChrome();
+	DrawBar(0, "                MACHINE", C_WHITE, C_BARBG);
+	DrawRow(1, " CHOOSE THE COMPUTER TO EMULATE", C_GREY, C_BG);
+	DrawRule(3);
+
+	char line[64];
+	for (int i = 0; i < MACHINE_COUNT; i++)
+	{
+		int row = SUP_LIST_TOP + i * 2;
+		bool selected = (i == machineCursor);
+		snprintf(line, sizeof(line), " %s%s", GetMachineProfile(i).name,
+		         i == machine->profile.id ? "  (RUNNING)" : "");
+		int fg = selected ? C_BLACK : (machineMissing[i] ? C_GREY : C_WHITE);
+		DrawRow(row, line, fg, selected ? C_CYAN : C_BG);
+		if (machineMissing[i])
+		{
+			snprintf(line, sizeof(line), "   NEEDS %s", machineMissing[i]);
+			DrawRow(row + 1, line, C_RED, C_BG);
+		}
+	}
+
+	vga->fillRect(0, RowY(20) + 3, VGA_WIDTH, 1, C_DIM);
+	DrawRow(21, status, C_AMBER, C_BG);
+	DrawRow(22, "ROM FILES GO IN /ROMS ON THE SD CARD", C_DIMCYAN, C_BG);
+	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:BACK", C_GREY, C_BARBG);
+}
+
+void Supervisor::RenderRestarting()
+{
+	DrawChrome();
+	DrawBar(0, "                MACHINE", C_WHITE, C_BARBG);
+	char line[64];
+	snprintf(line, sizeof(line), " RESTARTING AS %s...", GetMachineProfile(machineCursor).name);
+	DrawRow(10, line, C_YELLOW, C_BG);
+	DrawBar(23, "", C_GREY, C_BARBG);
 }

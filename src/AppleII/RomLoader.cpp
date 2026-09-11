@@ -14,6 +14,7 @@
 
 #include <SD.h>
 #include "RomLoader.h"
+#include "../Tools/FileSystem.h"
 
 // Plain bitwise CRC-32 (the zip/MAME polynomial). It runs once per ROM at
 // boot, over at most 16K, so a table is not worth the RAM.
@@ -39,7 +40,7 @@ RomStatus RomLoader::Check(const char* file, int size)
 	char path[64];
 	RomPath(file, path, sizeof(path));
 
-	File f = SD.open(path);
+	File f = FileSystem::Open(path);
 	if (!f || f.isDirectory())
 		return ROM_MISSING;
 	RomStatus status = ((int)f.size() == size) ? ROM_OK : ROM_BAD_SIZE;
@@ -52,7 +53,7 @@ RomStatus RomLoader::Load(const char* file, BYTE* dest, int size)
 	char path[64];
 	RomPath(file, path, sizeof(path));
 
-	File f = SD.open(path);
+	File f = FileSystem::Open(path);
 	if (!f || f.isDirectory())
 	{
 		Serial.printf("[rom] %s: missing\n", path);

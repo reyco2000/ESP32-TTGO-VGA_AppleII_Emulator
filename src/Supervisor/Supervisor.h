@@ -18,6 +18,7 @@
 
 #include "../AppleII/Predef.h"
 #include "../AppleII/AppleFont.h"
+#include "../AppleII/MachineProfile.h"
 
 class Apple2Machine;
 class VGA;
@@ -27,7 +28,7 @@ class VGA;
 #define SUP_PATH_LEN    256
 #define SUP_LIST_TOP    4    // first text row of the list window
 #define SUP_LIST_ROWS   16   // visible list rows
-#define SUP_ACTION_COUNT 4   // pinned [ ... ] items ahead of the SD entries
+#define SUP_ACTION_COUNT 5   // pinned [ ... ] items ahead of the SD entries
 
 // one SD directory entry shown in the browser
 struct SupEntry
@@ -50,7 +51,7 @@ public:
 	void Render(VGA* vga);
 
 private:
-	enum Mode { BROWSE, PICK_DRIVE, ABOUT };
+	enum Mode { BROWSE, PICK_DRIVE, ABOUT, PICK_MACHINE, RESTARTING };
 
 	Apple2Machine* machine;
 	AppleFont font;
@@ -71,8 +72,12 @@ private:
 	char status[SCREENTEXT_X + 1];
 	char pickPath[SUP_PATH_LEN]; // full path of file awaiting drive choice
 
+	int machineCursor;           // PICK_MACHINE selection, then the model restarting into
+	const char* machineMissing[MACHINE_COUNT];   // first missing ROM per model, NULL = bootable
+	bool bootNoteShown;          // the boot fallback note goes in the first status only
+
 	// virtual list layout: [0]=reset [1]=unmount d1 [2]=unmount d2
-	// [3]=about, then ".." when not at root, then entries[]
+	// [3]=machine [4]=about, then ".." when not at root, then entries[]
 	bool AtRoot() { return curPath[1] == '\0'; }
 	int VirtualCount();
 	void VirtualLabel(int index, char* out, int outlen);
@@ -83,6 +88,8 @@ private:
 	void Select();               // Enter pressed in BROWSE mode
 	void MountTo(int drive);
 	void MoveCursor(int delta);
+	void OpenMachinePicker();
+	void ChooseMachine(int id);
 
 	void SetStatus(const char* msg);
 
@@ -95,6 +102,8 @@ private:
 	void DrawChrome();               // page field, margins, stripe motif
 	void RenderBrowse();
 	void RenderAbout();
+	void RenderMachines();
+	void RenderRestarting();
 	int  RowColor(int index, bool selected, int* bg);
 };
 

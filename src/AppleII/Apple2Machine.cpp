@@ -28,6 +28,7 @@ Apple2Machine::Apple2Machine(const MachineProfile& p)
 {
 	DEBUG_PRINTLN("Construct Apple2Machine");
 	cpu.cmos = (profile.cpu == CPU_65C02);
+	device.iie = profile.iieMmu;
 	device.slots[6] = profile.diskIISlot6 ? &device.disk6 : NULL;
 }
 
@@ -38,7 +39,10 @@ Apple2Machine::~Apple2Machine()
 
 void Apple2Machine::InitMachine()
 {
-	mem.Create(profile.systemRomSize);
+	mem.Create(profile.systemRomSize, profile.iieMmu);
+	// before LoadRoms: Create() builds the video's default ][+ font, and the
+	// IIe character ROM has to replace it, not be wiped by it
+	device.Create(&cpu);
 	LoadRoms();
 	device.InsetFloppy();
 	// unset the Power-UP byte
@@ -47,7 +51,6 @@ void Apple2Machine::InitMachine()
 	mem.WriteByte(0x4D, 0xAA);   // Just crashes if this memory location equals zero
 	mem.WriteByte(0xD0, 0xAA);   // won't work if this memory location equals zero
 
-	device.Create(&cpu);
 	mem.device = &device;
 
 	Booting();
@@ -73,6 +76,15 @@ void Apple2Machine::LoadRoms()
 
 	if (RomLoader::Load(DISKII_ROM, device.disk6.rom, SL6SIZE) != ROM_OK)
 		memcpy(device.disk6.rom, diskII, SL6SIZE);
+
+	// IIe character generator: the first 2K of the video ROM is the set used
+	if (profile.charRom)
+	{
+		BYTE* buf = (BYTE*)ps_malloc(profile.charRomSize);
+		if (buf && RomLoader::Load(profile.charRom, buf, profile.charRomSize) == ROM_OK)
+			device.video.LoadCharRom(buf);
+		free(buf);
+	}
 }
 
 bool Apple2Machine::Booting()
@@ -98,6 +110,19 @@ void Apple2Machine::Reset()
 	mem.WriteByte(0xD0, 0xAA);   // Planetoids won't work if this memory location equals zero
 
 	Booting();
+}
+
+// Ctrl+F12: the RESET line. RAM survives; the ROM's reset handler decides
+// between a warm restart and a cold boot (Open Apple held on the IIe, or a
+// power-up byte that does not match).
+void Apple2Machine::WarmReset()
+{
+	device.resetRequested = false;
+	mem.ResetSwitches();
+	device.col80 = false;
+	device.altCharset = false;
+	device.dhires = false;
+	cpu.Reset(mem);
 }
 
 bool Apple2Machine::Mount(const char* path, int drive)
@@ -128,6 +153,8 @@ void Apple2Machine::Run(long long cycle)
 	}
 */
 	device.UpdateInput();
+	if (device.resetRequested)
+		WarmReset();
 	cpu.Run(mem, cycle);
 	while (1)
 	{

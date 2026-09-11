@@ -7,12 +7,12 @@
  *   MIT License
  * ============================================================
  *  File   : AppleVideo.cpp
- *  Module : Apple II video. Renders text, lores and hires from
- *           emulated memory into the 640x200 VGA framebuffer as
- *           palette indices: a 560x192 screen, each Apple dot two
- *           pixels wide, centred in a black border. Per-cell dirty
- *           caches skip unchanged cells. Also draws the F2 FPS
- *           overlay.
+ *  Module : Apple II video. Renders 40- and 80-column text, lores,
+ *           hires and double hires from emulated memory into the 640x200 VGA
+ *           framebuffer as palette indices: a 560x192 screen, each
+ *           40-column dot two pixels wide, centred in a black
+ *           border. Per-cell dirty caches skip unchanged cells.
+ *           Also draws the F2 FPS overlay.
  * ============================================================
 */
 
@@ -23,7 +23,7 @@
 #include "../VGA/VGA.h"
 
 // The Apple screen, 280x192 dots at double width, centred on the framebuffer.
-// X0 is even, so every dot is one whole framebuffer byte.
+// X0 is even, so every 40-column dot is one whole framebuffer byte.
 #define SCREEN_X0   40
 #define SCREEN_Y0   4
 #define CELL_W      (FONT_X * 2)             // a 40-column text or lores cell
@@ -94,12 +94,20 @@ AppleVideo::AppleVideo()
 	vga = NULL;
 	// the first frame loads the palette and clears the border
 	fullRepaint = true;
+	charRom = false;
+	lastMode = -1;
 	Reset();
 }
 
 void AppleVideo::Create()
 {
 	font.Create();
+}
+
+void AppleVideo::LoadCharRom(const BYTE* rom)
+{
+	font.LoadCharRom(rom);
+	charRom = true;
 }
 
 void AppleVideo::Reset()
@@ -111,18 +119,23 @@ void AppleVideo::Reset()
 	flashCycle = 0;
 }
 
-void AppleVideo::InvalidateRenderCache()
+void AppleVideo::InvalidateCells()
 {
 	memset(LoResCache, 0xFF, sizeof(LoResCache));
 	memset(TextCache, 0xFF, sizeof(TextCache));
 	memset(HiResCache, 0xFF, sizeof(HiResCache));
 	memset(previousBit, 0, sizeof(previousBit));
+}
+
+void AppleVideo::InvalidateRenderCache()
+{
+	InvalidateCells();
 	// whoever drew over us changed the palette and the border as well
 	fullRepaint = true;
 }
 
 /*
-	TEXT 40x24 ( 7x8 Font )
+	TEXT 40x24 ( 7x8 Font ), IIe 80x24
 	LORES : 40x24 (MIX 40x20)
 	HIRES : 280×192 (MIX 280×160)
 	In MIX mode the bottom is TEXT ( 4 Line : 32 pixel )
@@ -149,6 +162,9 @@ void AppleVideo::InvalidateFpsOverlayRegion()
 			previousBit[line][col] = 0;
 		}
 	}
+	// the same corner in 80-column text
+	for (int col = FPS_COL * 2; col < 80; col++)
+		TextCache[0][col] = -1;
 }
 
 void AppleVideo::RenderFpsOverlay(int fps)
@@ -181,6 +197,23 @@ void AppleVideo::Render(Memory& mem, const Apple2Device& dev, int frame, VGA* vg
 		fullRepaint = false;
 	}
 
+	// 80STORE turns PAGE2 into a main/aux memory switch; the display then
+	// stays on page 1
+	int page = mem.store80 ? 1 : dev.videoPage;
+	bool col80 = dev.col80 && mem.auxRam != NULL;
+	bool dhgr = col80 && dev.dhires && dev.hires_Mode;
+
+	// After a change of video mode nothing in the caches describes what is
+	// on screen, so repaint every cell rather than leave stale ones until
+	// the periodic refresh.
+	int mode = (dev.textMode ? 1 : 0) | (dev.mixedMode ? 2 : 0) | (dev.hires_Mode ? 4 : 0) |
+	           (page << 3) | (col80 ? 32 : 0) | (dev.altCharset ? 64 : 0) | (dhgr ? 128 : 0);
+	if (mode != lastMode)
+	{
+		lastMode = mode;
+		InvalidateCells();
+	}
+
 	// the overlay scribbles over cells the caches believe are up to date,
 	// so give them back to the emulator before it paints this frame
 	if (dev.fpsOverlay)
@@ -190,13 +223,15 @@ void AppleVideo::Render(Memory& mem, const Apple2Device& dev, int frame, VGA* vg
 	// text lines under lores or hires
 	if (!dev.textMode)
 	{
-		if (dev.hires_Mode)
-			RenderHires(mem, dev.videoPage, dev.mixedMode ? 160 : 192);
+		if (dhgr)
+			RenderDoubleHires(mem, page, dev.mixedMode ? 160 : 192);
+		else if (dev.hires_Mode)
+			RenderHires(mem, page, dev.mixedMode ? 160 : 192);
 		else
-			RenderLores(mem, dev.videoPage, dev.mixedMode ? 20 : 24);
+			RenderLores(mem, page, dev.mixedMode ? 20 : 24);
 	}
 	if (dev.textMode || dev.mixedMode)
-		RenderText40(mem, dev.videoPage, dev.textMode ? 0 : 20, frame);
+		RenderText(mem, dev, page, dev.textMode ? 0 : 20, frame, col80);
 
 	// drawn last: the overlay sits on top of the emulated screen
 	if (dev.fpsOverlay)
@@ -206,38 +241,66 @@ void AppleVideo::Render(Memory& mem, const Apple2Device& dev, int frame, VGA* vg
 		flashCycle = 0;
 }
 
-void AppleVideo::RenderText40(Memory& mem, int page, int firstLine, int frame)
+// The video circuit reads main and aux RAM directly, whatever RAMRD or the
+// other MMU switches say, so the screen comes from mem.ram / mem.auxRam
+// rather than through ReadByte.
+void AppleVideo::RenderText(Memory& mem, const Apple2Device& dev, int page, int firstLine, int frame, bool col80)
 {
 	WORD base = page * 0x0400;
+	int cols   = col80 ? 80 : SCREENTEXT_X;
+	int cellW  = col80 ? FONT_X : CELL_W;
+	int scaleX = col80 ? 1 : 2;
+	bool flashNormal = frame < 15;           // flashing cells show normal video half the time
 
 	for (int line = firstLine; line < SCREENTEXT_Y; line++)
 	{
-		for (int col = 0; col < SCREENTEXT_X; col++)
+		int row = base + offsetGR[line];
+		for (int c = 0; c < cols; c++)
 		{
-			// read video memory
-			BYTE glyph = mem.ReadByte(base + offsetGR[line] + col);
-
-			int fontattr = 0;
-			if (glyph > 0x7F)
-				fontattr = FONT_NORMAL;
-			else if (glyph < 0x40)
-				fontattr = FONT_INVERSE;
+			// 80 columns: aux memory holds the even columns, main the odd
+			BYTE code;
+			if (col80)
+				code = (c & 1) ? mem.ram[row + (c >> 1)] : mem.auxRam[row + (c >> 1)];
 			else
-				fontattr = FONT_FLASH;
+				code = mem.ram[row + c];
 
-			glyph &= 0x7F; // unset bit 7
-			if (glyph > 0x5F) glyph &= 0x3F; // shifts to match
-			if (glyph < 0x20) glyph |= 0x40; // the ASCII codes
+			int glyph;
+			bool inverse = false;
+			if (charRom)
+			{
+				// IIe video ROM: the screen byte is the glyph, inverse video
+				// included, except $40-$7F in the primary set, which flash
+				// between the inverse and normal forms of $00-$3F. The
+				// alternate set shows MouseText and inverse lowercase there.
+				glyph = code;
+				if (!dev.altCharset && code >= 0x40 && code < 0x80)
+					glyph = (code & 0x3F) | (flashNormal ? 0x80 : 0);
+			}
+			else
+			{
+				// ][+: bit 7 set is normal, $40-$7F flash, the rest inverse
+				int fontattr = 0;
+				if (code > 0x7F)
+					fontattr = FONT_NORMAL;
+				else if (code < 0x40)
+					fontattr = FONT_INVERSE;
+				else
+					fontattr = FONT_FLASH;
 
-			bool inverse = !(fontattr == FONT_NORMAL || (fontattr == FONT_FLASH && frame < 15));
+				glyph = code & 0x7F; // unset bit 7
+				if (glyph > 0x5F) glyph &= 0x3F; // shifts to match
+				if (glyph < 0x20) glyph |= 0x40; // the ASCII codes
+
+				inverse = !(fontattr == FONT_NORMAL || (fontattr == FONT_FLASH && flashNormal));
+			}
 
 			// only redraw a cell whose glyph or flash phase actually changed
 			int drawn = glyph | (inverse ? 0x100 : 0);
-			if (TextCache[line][col] != drawn || !flashCycle)
+			if (TextCache[line][c] != drawn || !flashCycle)
 			{
-				TextCache[line][col] = drawn;
-				font.RenderFont(vga, glyph, SCREEN_X0 + col * CELL_W, SCREEN_Y0 + line * FONT_Y,
-				                inverse, A2_WHITE, A2_BLACK);
+				TextCache[line][c] = drawn;
+				font.RenderFont(vga, glyph, SCREEN_X0 + c * cellW, SCREEN_Y0 + line * FONT_Y,
+				                inverse, A2_WHITE, A2_BLACK, scaleX);
 			}
 		}
 	}
@@ -253,7 +316,7 @@ void AppleVideo::RenderLores(Memory& mem, int page, int lines)
 	{
 		for (int col = 0; col < SCREENTEXT_X; col++)
 		{
-			BYTE glyph = mem.ReadByte(base + offsetGR[line] + col);
+			BYTE glyph = mem.ram[base + offsetGR[line] + col];
 			if (LoResCache[line][col] == glyph && flashCycle)
 				continue;
 			LoResCache[line][col] = glyph;
@@ -268,6 +331,43 @@ void AppleVideo::RenderLores(Memory& mem, int page, int lines)
 	}
 }
 
+// Double hires (IIe: HIRES + 80COL + AN3 off): 560 dots a line, 7 bits at a
+// time from aux then main memory. Every 4 dots from the left edge make one
+// of 140 colour pixels, the 4-bit pattern (leftmost dot in bit 0) indexing
+// the 16 lores colours. The cache works on 4 bytes at once - 28 dots, exactly
+// 7 colour pixels - so no pixel straddles two cache entries.
+void AppleVideo::RenderDoubleHires(Memory& mem, int page, int lines)
+{
+	WORD base = page * 0x2000;
+
+	for (int line = 0; line < lines; line++)
+	{
+		// one framebuffer pixel per dot, so 2 dots per byte
+		uint8_t* out = vga->row(SCREEN_Y0 + line) + (SCREEN_X0 >> 1);
+		const BYTE* mainRow = mem.ram + base + offsetHGR[line];
+		const BYTE* auxRow  = mem.auxRam + base + offsetHGR[line];
+
+		for (int col = 0; col < SCREENTEXT_X; col += 2)
+		{
+			uint32_t dots =  (uint32_t)(auxRow[col]      & 0x7F)
+			              | ((uint32_t)(mainRow[col]     & 0x7F) << 7)
+			              | ((uint32_t)(auxRow[col + 1]  & 0x7F) << 14)
+			              | ((uint32_t)(mainRow[col + 1] & 0x7F) << 21);
+			if (HiResCache[line][col] == (int)dots && flashCycle)
+				continue;
+			HiResCache[line][col] = dots;
+
+			uint8_t* p = out + col * 7;              // 28 dots = 14 bytes
+			for (int g = 0; g < 7; g++, dots >>= 4)
+			{
+				BYTE c = (dots & 0x0F) * 0x11;
+				p[2 * g] = c;
+				p[2 * g + 1] = c;
+			}
+		}
+	}
+}
+
 void AppleVideo::RenderHires(Memory& mem, int page, int lines)
 {
 	WORD base = page * 0x2000;
@@ -277,12 +377,12 @@ void AppleVideo::RenderHires(Memory& mem, int page, int lines)
 	{
 		// one framebuffer byte per Apple dot
 		uint8_t* out = vga->row(SCREEN_Y0 + line) + (SCREEN_X0 >> 1);
+		const BYTE* src = mem.ram + base + offsetHGR[line];
 
 		// for every 14 horizontal dots
 		for (int col = 0; col < SCREENTEXT_X; col += 2)
 		{
-			WORD word = (WORD)(mem.ReadByte(base + offsetHGR[line] + col + 1)) << 8;   // store the two next bytes into 'word'
-			word += mem.ReadByte(base + offsetHGR[line] + col);                        // in reverse order
+			WORD word = ((WORD)src[col + 1] << 8) | src[col];                         // the two bytes, in reverse order
 
 			// check if this group of dots needs a redraw
 			if (HiResCache[line][col] == word && flashCycle)

@@ -124,6 +124,7 @@ void AppleFont::Create()
 	int w, h;
 	unsigned char* img = read_bmp_memory((char*)normalfont, &w, &h);
 
+	memset(glyphs, 0, sizeof(glyphs));
 	for (int n = 0; n < FONT_NUM; n++)
 		for (int y = 0; y < FONT_Y; y++)
 		{
@@ -135,6 +136,21 @@ void AppleFont::Create()
 		}
 
 	free(img);
+}
+
+// IIe video ROM (342-0265-A): inverse characters are stored already
+// inverted, so every glyph renders with inv = false.
+void AppleFont::LoadCharRom(const unsigned char* rom)
+{
+	for (int n = 0; n < 256; n++)
+		for (int y = 0; y < FONT_Y; y++)
+		{
+			unsigned char lit = ~rom[n * 8 + y], bits = 0;
+			for (int x = 0; x < FONT_X; x++)
+				if (lit & (1 << x))
+					bits |= 0x40 >> x;
+			glyphs[n][y] = bits;
+		}
 }
 
 void AppleFont::RenderFont(VGA* vga, int fontnum, int posx, int posy, bool inv,
@@ -150,7 +166,7 @@ void AppleFont::RenderFont(VGA* vga, int fontnum, int posx, int posy, bool inv,
 		bg = t;
 	}
 
-	const unsigned char* glyph = glyphs[fontnum & (FONT_NUM - 1)];
+	const unsigned char* glyph = glyphs[fontnum & 0xFF];
 	const unsigned char fgPair = (fg << 4) | fg;
 	const unsigned char bgPair = (bg << 4) | bg;
 

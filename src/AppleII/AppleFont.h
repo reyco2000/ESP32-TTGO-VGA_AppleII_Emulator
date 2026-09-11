@@ -22,14 +22,18 @@ class VGA;
 class AppleFont
 {
 private:
-	// One byte per glyph row, bit 6 = leftmost of the 7 pixels.
-	unsigned char glyphs[FONT_NUM][FONT_Y];
+	// One byte per glyph row, bit 6 = leftmost of the 7 pixels. 256 glyphs
+	// for the IIe character ROM; the built-in ][+ font fills the first 128.
+	unsigned char glyphs[256][FONT_Y];
 	unsigned char* read_bmp_memory(char* buffer, int* _w, int* _h);
 public:
 	AppleFont();
 	~AppleFont();
 
 	void Create();
+	// Replaces the glyphs with a IIe character ROM set: 256 glyphs of 8
+	// bytes, bit 0 = leftmost dot, a dot lit where its bit is clear.
+	void LoadCharRom(const unsigned char* rom);
 	// Draws straight into the VGA framebuffer. There is no intermediate
 	// backbuffer: the framebuffer itself persists between frames, which is
 	// what lets the callers' dirty-cell caches skip unchanged glyphs.

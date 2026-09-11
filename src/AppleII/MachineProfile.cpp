@@ -16,12 +16,12 @@
 // Indexed by MachineId: keep the rows in enum order.
 static const MachineProfile profiles[MACHINE_COUNT] =
 {
-	// id                        name                   cpu           aux
-	{ MACHINE_APPLE2PLUS,       "APPLE ][+",           CPU_NMOS6502, false,
+	// id                        name                   cpu           aux    IIe MMU
+	{ MACHINE_APPLE2PLUS,       "APPLE ][+",           CPU_NMOS6502, false, false,
 	  // system ROM              size    embedded  char ROM                        size    disk II
 	  "apple2plus.rom",          0x3000, true,     NULL,                           0,      true },
 
-	{ MACHINE_APPLE2E_ENHANCED, "APPLE //E ENHANCED",  CPU_65C02,    true,
+	{ MACHINE_APPLE2E_ENHANCED, "APPLE //E ENHANCED",  CPU_65C02,    true,  true,
 	  "apple2e_enhanced.rom",    0x4000, false,    "apple2e_enhanced_video.rom",   0x1000, true },
 };
 

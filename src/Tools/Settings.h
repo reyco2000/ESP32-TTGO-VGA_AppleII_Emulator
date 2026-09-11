@@ -35,12 +35,15 @@ public:
 		return id;
 	}
 
-	static void SaveMachine(uint8_t id)
+	// false when NVS could not be written
+	static bool SaveMachine(uint8_t id)
 	{
 		Preferences p;
-		p.begin(NS, false);
-		p.putUChar("machine", id);
+		if (!p.begin(NS, false))
+			return false;
+		bool ok = p.putUChar("machine", id) == 1;
 		p.end();
+		return ok;
 	}
 
 	// Mounted disk image path for drive 0 or 1, "" when the drive is empty.
@@ -54,12 +57,14 @@ public:
 		return path;
 	}
 
-	static void SaveDisk(int drive, const char* path)
+	static bool SaveDisk(int drive, const char* path)
 	{
 		Preferences p;
-		p.begin(NS, false);
+		if (!p.begin(NS, false))
+			return false;
 		p.putString(DiskKey(drive), path ? path : "");
 		p.end();
+		return true;
 	}
 
 private:

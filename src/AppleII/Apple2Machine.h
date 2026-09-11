@@ -47,6 +47,7 @@ public:
 
 	void InitMachine();
 	void Reset();
+	void WarmReset();
 	bool Mount(const char* path, int drive);
 	void Unmount(int drive);
 	void Run(long long cycle);

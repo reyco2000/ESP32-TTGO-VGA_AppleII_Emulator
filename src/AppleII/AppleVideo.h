@@ -32,6 +32,9 @@ public:
 
 	void Create();
 	void Reset();
+	// IIe character generator: the first 2K of the video ROM. Until one is
+	// loaded, text uses the built-in ][+ font and its inverse/flash rules.
+	void LoadCharRom(const BYTE* rom);
 	void Render(Memory& mem, const Apple2Device& dev, int frame, VGA* vga);
 
 	// Everything repaints on the next frame, palette and border included:
@@ -47,17 +50,22 @@ private:
 	VGA* vga;
 	AppleFont font;
 	bool fullRepaint;
+	bool charRom;
+	int  lastMode;              // video switches the caches were drawn under
 
 	int LoResCache[24][40];
 	// text cells already drawn: glyph | 0x100 when drawn inverse, -1 = dirty.
-	int TextCache[24][40];
+	// 80 wide for the IIe's 80-column mode.
+	int TextCache[24][80];
 	int HiResCache[192][40];
 	BYTE previousBit[192][40];
 	BYTE flashCycle;
 
-	void RenderText40(Memory& mem, int page, int firstLine, int frame);
+	void InvalidateCells();
+	void RenderText(Memory& mem, const Apple2Device& dev, int page, int firstLine, int frame, bool col80);
 	void RenderLores(Memory& mem, int page, int lines);
 	void RenderHires(Memory& mem, int page, int lines);
+	void RenderDoubleHires(Memory& mem, int page, int lines);
 	void RenderFpsOverlay(int fps);
 };
 

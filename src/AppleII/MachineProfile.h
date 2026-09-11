@@ -41,6 +41,7 @@ struct MachineProfile
 	const char* name;           // supervisor / ABOUT text: uppercase font
 	CpuType     cpu;
 	bool        hasAux;         // 64K auxiliary RAM (IIe 80-column card)
+	bool        iieMmu;         // IIe MMU and switches: $C000-$C01F, internal $Cxxx ROM, aux banking
 	const char* systemRom;      // file name in /roms
 	uint16_t    systemRomSize;  // 12K = $D000-$FFFF, 16K = $C000-$FFFF
 	bool        embeddedRom;    // may fall back to the built-in ][+ image
