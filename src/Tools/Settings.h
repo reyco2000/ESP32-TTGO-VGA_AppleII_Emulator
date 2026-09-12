@@ -9,7 +9,8 @@
  *  File   : Settings.h
  *  Module : Persistent user settings in the ESP32 NVS partition,
  *           via the Arduino Preferences library. Holds the selected
- *           machine model and the two mounted disk paths, so that a
+ *           machine model, the keyboard layout and the two mounted
+ *           disk paths, so that a
  *           machine switch - which restarts the ESP32 - comes back
  *           up as the chosen model with the same disks mounted.
  * ============================================================
@@ -42,6 +43,29 @@ public:
 		if (!p.begin(NS, false))
 			return false;
 		bool ok = p.putUChar("machine", id) == 1;
+		p.end();
+		return ok;
+	}
+
+	// PS/2 keyboard layout id (KeyboardLayouts.h). Returns def when nothing
+	// has been saved yet.
+	static uint8_t LoadKeyboard(uint8_t def)
+	{
+		Preferences p;
+		if (!p.begin(NS, true))
+			return def;
+		uint8_t id = p.getUChar("kbd", def);
+		p.end();
+		return id;
+	}
+
+	// false when NVS could not be written
+	static bool SaveKeyboard(uint8_t id)
+	{
+		Preferences p;
+		if (!p.begin(NS, false))
+			return false;
+		bool ok = p.putUChar("kbd", id) == 1;
 		p.end();
 		return ok;
 	}

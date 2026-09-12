@@ -142,6 +142,7 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
 - Press **F1** to open the supervisor menu: arrow keys to move, **Enter** to open a directory or select a `.nib` (then `1`/`2` picks the drive), **ESC** to resume emulation. `[ ABOUT ]` shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
 - `[ MACHINE ]` switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
+- `[ KEYBOARD ]` picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
 - Use the menu's `[ RESET MACHINE ]` item (or `PR#6` from BASIC) to boot a mounted disk.
 - On the //e, `PR#3` turns on 80-column text; **Esc** then **4** or **8** switches between 40 and 80 columns, and **Esc** then **Ctrl+Q** turns the 80-column firmware off.
 
@@ -154,7 +155,19 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 | **Ctrl+Left Alt+Right Alt+F12** | //e: the built-in self-test, which ends with "System OK" |
 | **Left Alt / Right Alt** | Open Apple / Solid Apple (pushbuttons 0 and 1) |
 
-The keyboard is read with FabGL's US layout, whatever is printed on the keys. The ][+ sends capitals only, as the real machine did.
+### Keyboard layouts
+
+The keyboard starts on the US layout and can be switched in the F1 menu under `[ KEYBOARD ]`:
+
+| Layout | Keyboard |
+|---|---|
+| `US` | the FabGL default |
+| `LATIN AMERICAN` | Spanish (Latin American), the ISO keyboard sold across Latin America |
+| `BRAZILIAN ABNT2` | Portuguese (Brazil), with the Ç key and the extra key beside the right Shift |
+
+Picking the layout that matches your keyboard puts the punctuation Apple software needs — `/ ? ; : ' " ( ) [ ] { } @ \ | # &` and the rest — on the keys that are printed with it.
+
+The Apple II character set has no accented letters, so a layout cannot make them print: **Ñ, Ç and the accented vowels type nothing at all**, and the acute and diaeresis keys stay dead keys. Where an accent key also carries a character the Apple does have — the tilde, the caret, the backtick — that character is typed outright rather than waiting for a vowel, since the Apple cannot compose accents anyway. The ][+ sends capitals only, as the real machine did.
 
 ## License
 
@@ -191,5 +204,5 @@ If you're planning to dig in, start with [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 - [x] 80 column support
 - [x] Apple IIe support — IIe ROM, auxiliary memory bank, and the extra soft switches
 - [ ] Double hi-res — the renderer is written but not yet verified on screen
-- [ ] Keyboard layouts other than US, selectable from the F1 menu
+- [x] Keyboard layouts other than US, selectable from the F1 menu — Latin American and Brazilian ABNT2
 - [ ] Apple IIc and IIc Plus — the machine-profile and slot-card structure is meant to take them as new profiles

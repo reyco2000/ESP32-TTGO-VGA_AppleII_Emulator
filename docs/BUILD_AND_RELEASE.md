@@ -164,10 +164,11 @@ Chrome-based browser — no toolchain needed.
 1. Bump `FW_VERSION_STR` in `src/Version.h`
 2. `tools/build-firmware.sh` — clean build, no warnings that matter
 3. `tests/host/run-cpu-tests.sh` — both CPU suites must PASS
-4. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens (check
+4. `tests/host/run-layout-tests.sh` — the keyboard layout tables must PASS
+5. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens (check
    `[ ABOUT ]` reports the version you just bumped), F2 FPS toggles. With the
    //e ROMs in `/roms`, switch to the //e in `[ MACHINE ]`: it must restart into
    the "Apple //e" screen, and `PR#3` must give 80 columns; switch back to the ][+
-5. Commit and push the source
-6. Tag with the same version, push the tag, `gh release create` with the merged
+6. Commit and push the source
+7. Tag with the same version, push the tag, `gh release create` with the merged
    binary and `SHA256SUMS`

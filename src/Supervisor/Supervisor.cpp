@@ -26,6 +26,7 @@
 #include "../Version.h"
 #include "../AppleII/RomLoader.h"
 #include "../Tools/Settings.h"
+#include "../Tools/KeyboardLayouts.h"
 
 extern fabgl::Keyboard *keyboard_ptr;
 
@@ -96,6 +97,7 @@ Supervisor::Supervisor(Apple2Machine* m)
 	for (int i = 0; i < MACHINE_COUNT; i++)
 		machineMissing[i] = NULL;
 	bootNoteShown = false;
+	keyboardCursor = 0;
 }
 
 Supervisor::~Supervisor()
@@ -269,6 +271,22 @@ void Supervisor::Update()
 			continue;
 		}
 
+		if (mode == PICK_KEYBOARD)
+		{
+			if (vk == fabgl::VK_UP && keyboardCursor > 0)
+				keyboardCursor--;
+			else if (vk == fabgl::VK_DOWN && keyboardCursor < KEYBOARD_LAYOUT_COUNT - 1)
+				keyboardCursor++;
+			else if (vk == fabgl::VK_RETURN)
+				ChooseKeyboard(keyboardCursor);
+			else if (vk == fabgl::VK_ESCAPE)
+			{
+				SetStatus("");
+				mode = BROWSE;
+			}
+			continue;
+		}
+
 		if (mode == RESTARTING)
 			continue;
 
@@ -324,6 +342,8 @@ void Supervisor::Render(VGA* vgaOut)
 		RenderAbout();
 	else if (mode == PICK_MACHINE)
 		RenderMachines();
+	else if (mode == PICK_KEYBOARD)
+		RenderKeyboards();
 	else if (mode == RESTARTING)
 	{
 		// the choice is already in NVS; show it long enough to read
@@ -390,28 +410,30 @@ void Supervisor::RenderAbout()
 	DrawText(13, 5, machine->profile.cpu == CPU_65C02 ? "65C02" : "MOS 6502", C_WHITE, C_BG);
 	DrawText(2, 6, "DISPLAY", C_YELLOW, C_BG);
 	DrawText(13, 6, "640X200 VGA / 16 COLORS", C_WHITE, C_BG);
-	DrawText(2, 7, "VERSION", C_YELLOW, C_BG);
-	DrawText(13, 7, FW_VERSION_STR, C_WHITE, C_BG);
-	DrawText(2, 8, "BUILT", C_YELLOW, C_BG);
-	DrawText(13, 8, FW_BUILD_DATE, C_WHITE, C_BG);
+	DrawText(2, 7, "KEYBOARD", C_YELLOW, C_BG);
+	DrawText(13, 7, GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name, C_WHITE, C_BG);
+	DrawText(2, 8, "VERSION", C_YELLOW, C_BG);
+	DrawText(13, 8, FW_VERSION_STR, C_WHITE, C_BG);
+	DrawText(2, 9, "BUILT", C_YELLOW, C_BG);
+	DrawText(13, 9, FW_BUILD_DATE, C_WHITE, C_BG);
 
-	DrawText(2, 10, "CREDITS", C_YELLOW, C_BG);
-	DrawText(2, 11, "REINALDO TORRES / COCO BYTE CLUB", C_WHITE, C_BG);
-	DrawText(2, 12, "BASED ON CODESAFE", C_GREY, C_BG);
-	DrawText(4, 13, "ESP32-VGA_APPLEII_EMULATOR", C_GREY, C_BG);
-	DrawText(2, 14, "FABGL BY FABRIZIO DI VITTORIO", C_GREY, C_BG);
-	DrawText(2, 15, "CO-DEVELOPED WITH CLAUDE CODE", C_GREY, C_BG);
-	DrawText(2, 16, "MIT LICENSE", C_GREY, C_BG);
+	DrawText(2, 11, "CREDITS", C_YELLOW, C_BG);
+	DrawText(2, 12, "REINALDO TORRES / COCO BYTE CLUB", C_WHITE, C_BG);
+	DrawText(2, 13, "BASED ON CODESAFE", C_GREY, C_BG);
+	DrawText(4, 14, "ESP32-VGA_APPLEII_EMULATOR", C_GREY, C_BG);
+	DrawText(2, 15, "FABGL BY FABRIZIO DI VITTORIO", C_GREY, C_BG);
+	DrawText(2, 16, "CO-DEVELOPED WITH CLAUDE CODE", C_GREY, C_BG);
+	DrawText(2, 17, "MIT LICENSE", C_GREY, C_BG);
 
-	DrawText(2, 18, "GITHUB.COM/REYCO2000/", C_DIMCYAN, C_BG);
-	DrawText(4, 19, "ESP32-TTGO-VGA_APPLEII_EMULATOR", C_DIMCYAN, C_BG);
+	DrawText(2, 19, "GITHUB.COM/REYCO2000/", C_DIMCYAN, C_BG);
+	DrawText(4, 20, "ESP32-TTGO-VGA_APPLEII_EMULATOR", C_DIMCYAN, C_BG);
 
 	DrawBar(23, "           PRESS ESC TO RETURN", C_GREY, C_BARBG);
 }
 
 //////////////////////////////////////////////////////////////////////////
-// Virtual list: [0]=reset [1]=unmount d1 [2]=unmount d2 [3]=machine [4]=about, then ".."
-// when not at root, then the scanned entries
+// Virtual list: [0]=reset [1]=unmount d1 [2]=unmount d2 [3]=machine
+// [4]=keyboard [5]=about, then ".." when not at root, then the scanned entries
 
 int Supervisor::VirtualCount()
 {
@@ -441,6 +463,12 @@ void Supervisor::VirtualLabel(int index, char* out, int outlen)
 		return;
 	}
 	if (index == 4)
+	{
+		snprintf(out, outlen, " [ KEYBOARD: %s ]",
+		         GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name);
+		return;
+	}
+	if (index == 5)
 	{
 		snprintf(out, outlen, " [ ABOUT ]");
 		return;
@@ -583,7 +611,12 @@ void Supervisor::Select()
 		OpenMachinePicker();
 		return;
 	}
-	if (index == 4)                          // [ ABOUT ]
+	if (index == 4)                          // [ KEYBOARD: ... ]
+	{
+		OpenKeyboardPicker();
+		return;
+	}
+	if (index == 5)                          // [ ABOUT ]
 	{
 		mode = ABOUT;
 		return;
@@ -698,6 +731,54 @@ void Supervisor::RenderMachines()
 	vga->fillRect(0, RowY(20) + 3, VGA_WIDTH, 1, C_DIM);
 	DrawRow(21, status, C_AMBER, C_BG);
 	DrawRow(22, "ROM FILES GO IN /ROMS ON THE SD CARD", C_DIMCYAN, C_BG);
+	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:BACK", C_GREY, C_BARBG);
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Keyboard layout picker. A layout only changes how FabGL turns scancodes
+// into characters, so unlike a machine switch it takes effect as soon as
+// it is chosen; NVS only has to remember it for the next boot.
+
+void Supervisor::OpenKeyboardPicker()
+{
+	keyboardCursor = CurrentKeyboardLayoutId();
+	SetStatus("");
+	mode = PICK_KEYBOARD;
+}
+
+void Supervisor::ChooseKeyboard(int id)
+{
+	const KeyboardLayoutProfile* profile = ApplyKeyboardLayout((uint8_t)id, keyboard_ptr);
+
+	char msg[SCREENTEXT_X + 1];
+	if (Settings::SaveKeyboard(profile->id))
+		snprintf(msg, sizeof(msg), "KEYBOARD: %s", profile->name);
+	else
+		snprintf(msg, sizeof(msg), "%s, NOT SAVED (NVS)", profile->name);
+	SetStatus(msg);
+	mode = BROWSE;
+}
+
+void Supervisor::RenderKeyboards()
+{
+	DrawChrome();
+	DrawBar(0, "               KEYBOARD", C_WHITE, C_BARBG);
+	DrawRow(1, " CHOOSE THE PS/2 KEYBOARD LAYOUT", C_GREY, C_BG);
+	DrawRule(3);
+
+	char line[64];
+	for (int i = 0; i < KEYBOARD_LAYOUT_COUNT; i++)
+	{
+		int row = SUP_LIST_TOP + i;
+		bool selected = (i == keyboardCursor);
+		snprintf(line, sizeof(line), " %s%s", GetKeyboardLayoutProfile(i)->name,
+		         i == CurrentKeyboardLayoutId() ? "  (IN USE)" : "");
+		DrawRow(row, line, selected ? C_BLACK : C_WHITE, selected ? C_CYAN : C_BG);
+	}
+
+	vga->fillRect(0, RowY(20) + 3, VGA_WIDTH, 1, C_DIM);
+	DrawRow(21, status, C_AMBER, C_BG);
+	DrawRow(22, "ACCENTS AND N-TILDE HAVE NO APPLE KEY", C_DIMCYAN, C_BG);
 	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:BACK", C_GREY, C_BARBG);
 }
 

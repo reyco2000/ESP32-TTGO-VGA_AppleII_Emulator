@@ -22,6 +22,7 @@
 #include "src/AppleII/Apple2Machine.h"
 #include "src/AppleII/RomLoader.h"
 #include "src/Tools/Settings.h"
+#include "src/Tools/KeyboardLayouts.h"
 #include "src/VGA/VGA.h"
 #include "src/Tools/Log.h"
 #include "src/Supervisor/Supervisor.h"
@@ -136,6 +137,13 @@ void setup()
     // Initialize FabGL PS2 controller
     PS2Controller.begin(PS2Preset::KeyboardPort0);
     keyboard_ptr = PS2Controller.keyboard();
+
+    // Keyboard layout from NVS. FabGL starts on US, so this only has to run
+    // when something else was chosen, but applying it unconditionally keeps
+    // the boot log honest about which layout is live.
+    const KeyboardLayoutProfile* kbd =
+        ApplyKeyboardLayout(Settings::LoadKeyboard(KEYBOARD_LAYOUT_US), keyboard_ptr);
+    Serial.printf("[kbd] layout: %s\n", kbd->name);
 
     // Machine model from NVS. A model with no built-in ROM can only boot when
     // its ROMs are on the card; otherwise fall back to the ][+ and say why.
