@@ -28,7 +28,7 @@ class VGA;
 #define SUP_PATH_LEN    256
 #define SUP_LIST_TOP    4    // first text row of the list window
 #define SUP_LIST_ROWS   16   // visible list rows
-#define SUP_ACTION_COUNT 5   // pinned [ ... ] items ahead of the SD entries
+#define SUP_ACTION_COUNT 6   // pinned [ ... ] items ahead of the SD entries
 
 // one SD directory entry shown in the browser
 struct SupEntry
@@ -51,7 +51,7 @@ public:
 	void Render(VGA* vga);
 
 private:
-	enum Mode { BROWSE, PICK_DRIVE, ABOUT, PICK_MACHINE, RESTARTING };
+	enum Mode { BROWSE, PICK_DRIVE, ABOUT, PICK_MACHINE, PICK_KEYBOARD, RESTARTING };
 
 	Apple2Machine* machine;
 	AppleFont font;
@@ -76,8 +76,11 @@ private:
 	const char* machineMissing[MACHINE_COUNT];   // first missing ROM per model, NULL = bootable
 	bool bootNoteShown;          // the boot fallback note goes in the first status only
 
+	int keyboardCursor;          // PICK_KEYBOARD selection
+
 	// virtual list layout: [0]=reset [1]=unmount d1 [2]=unmount d2
-	// [3]=machine [4]=about, then ".." when not at root, then entries[]
+	// [3]=machine [4]=keyboard [5]=about, then ".." when not at root,
+	// then entries[]
 	bool AtRoot() { return curPath[1] == '\0'; }
 	int VirtualCount();
 	void VirtualLabel(int index, char* out, int outlen);
@@ -90,6 +93,8 @@ private:
 	void MoveCursor(int delta);
 	void OpenMachinePicker();
 	void ChooseMachine(int id);
+	void OpenKeyboardPicker();
+	void ChooseKeyboard(int id);
 
 	void SetStatus(const char* msg);
 
@@ -103,6 +108,7 @@ private:
 	void RenderBrowse();
 	void RenderAbout();
 	void RenderMachines();
+	void RenderKeyboards();
 	void RenderRestarting();
 	int  RowColor(int index, bool selected, int* bg);
 };
