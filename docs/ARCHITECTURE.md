@@ -10,7 +10,7 @@ performance or correctness rather than failing the build.
 The emulation core is decoupled from the ESP32/FabGL platform layer.
 `Apple2Machine` and its components know nothing about VGA or FabGL directly.
 Only `VGA` (`src/VGA/VGA.h`), the `.ino`, `src/Supervisor/`, and the PS/2
-keyboard code in `Apple2Device.cpp` touch `fabgl::` types.
+keyboard and mouse code in `Apple2Device.cpp` touch `fabgl::` types.
 
 `AppleVideo.cpp` and `AppleFont.cpp` do include `VGA.h` (and so, transitively,
 `fabgl.h`) in order to draw — but they use only the `VGA` wrapper, never
@@ -25,6 +25,7 @@ ESP32-VGA_AppleII_Emulator.ino   setup: SD, VGA, PS/2, picks the machine, starts
         ├── Memory                 page-table address map: Language Card, IIe MMU, $Cxxx ROM
         └── Apple2Device           soft switches, keyboard, speaker
               ├── Card* slots[8]   slot 6: DiskIICard
+              ├── Joystick         paddles 0/1 and buttons from the PS/2 mouse
               └── AppleVideo       text / lores / hires / double hires -> VGA
   ├── MachineProfile               what distinguishes the models
   ├── RomLoader                    ROM files from /roms on the SD card
@@ -100,6 +101,18 @@ went down; translating later, with the modifiers as they are by then, reordered
 fast typing. Characters wait in a 16-key type-ahead queue and are latched one at
 a time as the program clears the strobe. Set `KEY_TRACE` to 1 at the top of
 `Apple2Device.cpp` for a serial trace of every key event.
+
+The joystick is a PS/2 mouse on the second port (`KeyboardPort0_MousePort1`:
+keyboard on GPIO 33/32, **mouse on GPIO 26/27**). GPIO 26 used to be driven as
+a second speaker pin; the speaker is now GPIO 25 only, and nothing else may
+drive 26. `UpdateGamepad()` drains FabGL's mouse deltas every frame into
+`Joystick` (`src/AppleII/Joystick.*`, no FabGL types, host-tested by
+`tests/host/run-joystick-tests.sh`), which accumulates them into two 0-255
+axes. The paddle timers are emulated in CPU time, not wall time: an access to
+`$C070`-`$C07D` records `cpu->CurrentTick()`, and `$C064`-`$C067` return bit 7
+until `axis * 11` cycles have passed — 11 cycles being one pass of the ROM's
+PREAD loop — so `PDL()` counts exactly the axis value. `$C061`/`$C062` are the
+left/right mouse buttons OR'd with Left/Right Alt.
 
 **`AppleVideo`** (`src/AppleII/AppleVideo.*`) renders into the framebuffer as
 palette indices: a 560x192 picture at (40,4), each 40-column dot two pixels wide,

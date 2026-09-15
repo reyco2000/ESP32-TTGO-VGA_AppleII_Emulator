@@ -8,9 +8,10 @@
  * ============================================================
  *  File   : Apple2Device.cpp
  *  Module : Apple II peripherals. Routes slot I/O to the cards
- *           (Disk II: DiskIICard.cpp), PS/2 keyboard and gamepad
- *           input, and the soft switches, including the video
- *           mode flags AppleVideo renders from.
+ *           (Disk II: DiskIICard.cpp), PS/2 keyboard input, the
+ *           PS/2 mouse as joystick (paddle timers: Joystick.cpp),
+ *           and the soft switches, including the video mode
+ *           flags AppleVideo renders from.
  * ============================================================
 */
 
@@ -24,6 +25,7 @@
 #include "fabgl.h"
 
 extern fabgl::Keyboard *keyboard_ptr;
+extern fabgl::Mouse *mouse_ptr;
 
 // Serial trace of every key event, of each character latched for the Apple
 // and of the program taking it: for chasing keyboard problems (layouts,
@@ -58,6 +60,7 @@ Apple2Device::Apple2Device()
 	// machine reset must not switch the user's FPS display off
 	fpsOverlay = false;
 	fpsValue = 0;
+	mouseMiddle = false;
 	iie = false;
 	for (int slot = 0; slot < 8; slot++)
 		slots[slot] = NULL;
@@ -196,75 +199,26 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 			//printf("HIRES Mode On\n");
 			break;
 
-		/////////////////////////////////////////////////////////////////////////////////	Joy Paddle ?
+		/////////////////////////////////////////////////////////////////////////////////	Joystick
 
-/*
-	https://apple2.org.za/gswv/a2zine/faqs/csa2pfaq.html
+		// PADDLE0-3: bit 7 stays set while the paddle's timer runs, for a
+		// time proportional to its position (up to about 2.8 ms at 255).
+		// Paddles 2 and 3 are not connected and read as run out.
+		case 0xC064:
+		case 0xC065:
+		case 0xC066:
+		case 0xC067:
+			return joystick.ReadPaddle(address - 0xC064, cpu->CurrentTick());
 
-	These are actually the first two game Pushbutton inputs (PB0
-	and PB1) which are borrowed by the Open Apple and Closed Apple
-	keys. Bit 7 is set (=1) in these locations if the game switch or
-	corresponding key is pressed.
-
-	PB2 =      $C063 ;game Pushbutton 2 (read)
-	This input has an option to be connected to the shift key on
-	the keyboard. (See info on the 'shift key mod'.)
-
-	PADDLE0 =  $C064 ;bit 7 = status of pdl-0 timer (read)
-	PADDLE1 =  $C065 ;bit 7 = status of pdl-1 timer (read)
-	PADDLE2 =  $C066 ;bit 7 = status of pdl-2 timer (read)
-	PADDLE3 =  $C067 ;bit 7 = status of pdl-3 timer (read)
-	PDLTRIG =  $C070 ;trigger paddles
-	Read this to start paddle countdown, then time the period until
-	$C064-$C067 bit 7 becomes set to determine the paddle position.
-	This takes up to three milliseconds if the paddle is at its maximum
-	extreme (reading of 255 via the standard firmware routine).
-
-	SETIOUDIS= $C07E ;enable DHIRES & disable $C058-5F (W)
-	CLRIOUDIS= $C07E ;disable DHIRES & enable $C058-5F (W)
-
-*/
-/*
-		// Push Button 0
-		case 0xC061: 
-		{
-			if (gamepad.pressbtn2)
-				return 0x80;
-			else
-				return 0;
-		}
-		// Push Button 1
-		case 0xC062: 
-		{
-			if (gamepad.pressbtn1)
-				return 0x80;
-			else
-				return 0;
-		}
-
-// 		// Push Button 2
-// 		case 0xC063: 
-// 			return 0;
-
-		// Paddle 0
-		case 0xC064: 
-		{
-			BYTE v = readPaddle(0);
-			return(v);
-		}
-
-		// Paddle 1
-		case 0xC065: 
-		{
-			BYTE v = readPaddle(1);
-			return(v);
-		}
-
-		// paddle timer RST
-		case 0xC070: 
-			resetPaddles(); 
+		// PTRIG: any access starts all four timers. $C07E/$C07F are the
+		// IIe's IOUDIS switches, not handled.
+		case 0xC070: case 0xC071: case 0xC072: case 0xC073:
+		case 0xC074: case 0xC075: case 0xC076: case 0xC077:
+		case 0xC078: case 0xC079: case 0xC07A: case 0xC07B:
+		case 0xC07C: case 0xC07D:
+			joystick.Trigger(cpu->CurrentTick());
 			break;
-*/
+
 		// $CFFF stops the drive motor, as the original emulator did (on real
 		// hardware it releases the slots' $C800 expansion ROMs)
 		case 0xCFFF:
@@ -272,7 +226,8 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 			break;
 
 		// Pushbuttons 0 and 1: on the IIe these are the Open Apple and
-		// Solid Apple keys, here the PC's left and right Alt
+		// Solid Apple keys, here the PC's left and right Alt, or the
+		// mouse's left and right buttons
 		case 0xC061:
 			return ButtonDown(0) ? 0x80 : 0;
 		case 0xC062:
@@ -443,6 +398,8 @@ bool Apple2Device::AnyKeyDown()
 
 bool Apple2Device::ButtonDown(int button)
 {
+	if (joystick.Button(button))
+		return true;
 	return keyboard_ptr && keyboard_ptr->isVKDown(button == 0 ? fabgl::VK_LALT : fabgl::VK_RALT);
 }
 
@@ -461,8 +418,9 @@ static bool sound_state = false;
 void Apple2Device::PlaySound()
 {
 	sound_state = !sound_state;
+	// GPIO 25 is the audio jack; 26 used to be driven too, but it is the
+	// mouse port's clock line
 	digitalWrite(25, sound_state ? HIGH : LOW);
-	digitalWrite(26, sound_state ? HIGH : LOW);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////// Keyboard
@@ -500,6 +458,11 @@ void Apple2Device::UpdateKeyBoard()
             fpsOverlay = !fpsOverlay;
             // repaint what the overlay covered (or is about to cover)
             InvalidateFpsOverlayRegion();
+            continue;
+        }
+        if (vk == fabgl::VK_F3)
+        {
+            joystick.Center();
             continue;
         }
         if (vk == fabgl::VK_F12 && item.CTRL)
@@ -563,9 +526,22 @@ void Apple2Device::UpdateKeyBoard()
 }
 
 
-// game pad update
+// PS/2 mouse as the joystick: drain every movement report FabGL has queued
+// since the last frame, so no motion is lost, and keep the latest buttons.
 void Apple2Device::UpdateGamepad()
 {
+    if (!mouse_ptr || !mouse_ptr->isMouseAvailable())
+        return;
+
+    fabgl::MouseDelta delta;
+    while (mouse_ptr->getNextDelta(&delta, 0))
+    {
+        joystick.AddMotion(delta.deltaX, delta.deltaY);
+        joystick.SetButtons(delta.buttons.left, delta.buttons.right);
+        if (delta.buttons.middle && !mouseMiddle)
+            joystick.Center();
+        mouseMiddle = delta.buttons.middle;
+    }
 }
 
 

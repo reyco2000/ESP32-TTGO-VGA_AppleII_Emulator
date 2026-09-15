@@ -38,6 +38,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 - Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not yet verified — see TODO)
 - Two emulated Disk II drives with nibblized (`.nib`) disk images
 - **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount `.nib` images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with `[ MACHINE ]`, or open `[ ABOUT ]` for the firmware version and credits. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
+- **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
 - **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
 - Boots to BASIC with no disk mounted; the Disk II boot PROM is only visible to the machine while a disk is mounted, so `PR#6` and the boot-time slot scan always behave
 
@@ -46,6 +47,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 - **[LilyGo TTGO VGA32 v1.4](https://lilygo.cc/en-us/products/fabgl-vga32?_pos=1&_sid=4c095f59b&_ss=r)** (ESP32-WROVER-E, 4 MB PSRAM, 4 MB flash)
 - **VGA monitor** capable of 640×480 @ 60 Hz (most VGA CRTs and adapters; some modern LCDs accept this mode, others won't sync)
 - **PS/2 keyboard** plugged into the board's mini-DIN PS/2 jack
+- **PS/2 mouse** (optional) in the second PS/2 jack — it is the Apple II joystick
 - **MicroSD card** (FAT32 formatted) inserted in the on-board socket
 - **3.5 mm audio output** (mono) on the board's jack
 - **5 V USB-C** for power and serial programming
@@ -56,12 +58,12 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 
 If you just want to run the emulator without building from source, grab the pre-built firmware and use the browser-based flasher — no toolchain, no drivers to install beyond your board's USB-serial driver.
 
-1. Download `ESP32-AppleII-v0.3.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
+1. Download `ESP32-AppleII-v0.4.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
 2. Connect your TTGO VGA32 board via USB
 3. Open [ESP Web Tool](https://espressif.github.io/esptool-js/) in a Chrome or Edge browser
 4. Click **Connect** and select the board's serial port
 5. Set the flash offset to `0x0000`
-6. Choose the downloaded `ESP32-AppleII-v0.3.0.bin`
+6. Choose the downloaded `ESP32-AppleII-v0.4.0.bin`
 7. Click **Program** and wait for the flash to complete
 
 Hold the **BOOT** button on the board while clicking **Connect** if the browser cannot reach the device.
@@ -76,7 +78,7 @@ Same binary, if you'd rather not use a browser:
 
 ```bash
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-AppleII-v0.3.0.bin
+  write_flash 0x0 ESP32-AppleII-v0.4.0.bin
 ```
 
 Depending on the board's USB-serial chip the port may enumerate as `/dev/ttyACM0` instead of `/dev/ttyUSB0`.
@@ -99,7 +101,7 @@ To produce a release image of your own — bootloader + partition table + boot_a
 tools/build-firmware.sh          # output in build/, plus SHA256SUMS
 ```
 
-The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.3.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
+The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.4.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
 
 The CPU cores have host-side tests that run on the build machine rather than the ESP32 (they need `g++` and `curl`, and download the test images on first run):
 
@@ -150,10 +152,24 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 |---|---|
 | **F1** | supervisor menu |
 | **F2** | FPS counter on / off |
+| **F3** | centre the joystick |
 | **Ctrl+F12** | Ctrl-Reset: a warm reset, memory kept |
 | **Ctrl+Left Alt+F12** | //e: Open-Apple-Ctrl-Reset, a cold boot |
 | **Ctrl+Left Alt+Right Alt+F12** | //e: the built-in self-test, which ends with "System OK" |
 | **Left Alt / Right Alt** | Open Apple / Solid Apple (pushbuttons 0 and 1) |
+
+### Joystick
+
+A PS/2 mouse in the board's second PS/2 jack stands in for the Apple II joystick. Plug it in before powering up: PS/2 devices are only detected at boot.
+
+| Mouse | Apple II |
+|---|---|
+| move left / right | paddle 0, `PDL(0)` 0–255 |
+| move up / down | paddle 1, `PDL(1)` 0 (top) – 255 (bottom) |
+| left / right button | pushbuttons 0 and 1, same as Left / Right Alt |
+| middle button (or **F3**) | centre the stick |
+
+A mouse does not spring back to the middle like a joystick, so the stick stays where you leave it until you centre it. A short Applesoft program to check everything works is in [docs/JOYSTICK_TEST.md](docs/JOYSTICK_TEST.md).
 
 ### Keyboard layouts
 
