@@ -8,8 +8,8 @@
  * ============================================================
  *  File   : Apple2Device.h
  *  Module : Apple II peripherals (interface). Slot cards,
- *           soft-switch and video-mode flags, the video renderer
- *           and the FPS overlay state.
+ *           soft-switch and video-mode flags, the video renderer,
+ *           the mouse-driven joystick and the FPS overlay state.
  * ============================================================
 */
 
@@ -20,6 +20,7 @@
 #include <string>
 #include "AppleVideo.h"
 #include "DiskIICard.h"
+#include "Joystick.h"
 #include "../Tools/Log.h"
 
 class CPU;	// 6502 cpu
@@ -45,6 +46,10 @@ public:
 	// handled by SoftSwitch). Apple2Machine installs what its profile has.
 	Card* slots[8];
 	DiskIICard disk6;
+
+	// Paddles 0/1 and pushbuttons 0/1, moved by the PS/2 mouse. Not in
+	// Reset(): an emulated reset leaves the stick where it is.
+	Joystick joystick;
 
 	//////////////////////////////////////////////////////////////////////////
 
@@ -84,8 +89,9 @@ private:
 
 	// Keyboard
 	void UpdateKeyBoard();
-	// GamePad
+	// PS/2 mouse as the joystick
 	void UpdateGamepad();
+	bool mouseMiddle;           // middle button was down: centre on the press only
 
 	BYTE IIeSwitch(Memory* mem, WORD address, bool WRT);
 	bool AnyKeyDown();

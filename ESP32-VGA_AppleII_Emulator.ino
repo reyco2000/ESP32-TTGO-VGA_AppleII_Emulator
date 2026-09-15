@@ -9,7 +9,8 @@
  *  File   : ESP32-VGA_AppleII_Emulator.ino
  *  Module : Arduino sketch entry point. setup() brings up PSRAM,
  *           the SD card, FabGL's VGA DisplayController and the
- *           PS/2 keyboard, then constructs Apple2Machine, VGA and
+ *           PS/2 keyboard and mouse (the joystick), then
+ *           constructs Apple2Machine, VGA and
  *           Supervisor. loop() runs one video frame's worth of
  *           6502 cycles, renders and presents.
  * ============================================================
@@ -29,6 +30,8 @@
 
 // Global pointer to keyboard for Apple2Device to read from
 fabgl::Keyboard *keyboard_ptr = nullptr;
+// PS/2 mouse on the second port, read by Apple2Device as the joystick
+fabgl::Mouse *mouse_ptr = nullptr;
 fabgl::PS2Controller PS2Controller;
 AppleVGAController DisplayController;       // see src/VGA/VGA.h
 fabgl::Canvas Canvas(&DisplayController);
@@ -77,9 +80,8 @@ void setup()
 {
     Serial.begin(115200);
     
-    // Initialize audio pins
+    // Audio pin. GPIO 26 belongs to the mouse port (PS/2 clock).
     pinMode(25, OUTPUT);
-    pinMode(26, OUTPUT);
     // LilyGO TTGO VGA32 v1.4 PSRAM detection
     if(psramInit()) {
         Serial.println("\nPSRAM is correctly initialized");
@@ -134,9 +136,14 @@ void setup()
     Serial.println("====================================\n");
 
 
-    // Initialize FabGL PS2 controller
-    PS2Controller.begin(PS2Preset::KeyboardPort0);
+    // Initialize FabGL PS2 controller: keyboard on port 0 (GPIO 33/32), mouse
+    // on port 1 (GPIO 26/27) as the joystick. With no mouse plugged in, its
+    // reset retries for about 1.7 s and the joystick stays centred.
+    PS2Controller.begin(PS2Preset::KeyboardPort0_MousePort1);
     keyboard_ptr = PS2Controller.keyboard();
+    mouse_ptr = PS2Controller.mouse();
+    Serial.printf("[mouse] joystick: %s\n",
+                  mouse_ptr && mouse_ptr->isMouseAvailable() ? "present" : "absent");
 
     // Keyboard layout from NVS. FabGL starts on US, so this only has to run
     // when something else was chosen, but applying it unconditionally keeps
