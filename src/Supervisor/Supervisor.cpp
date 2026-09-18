@@ -27,6 +27,7 @@
 #include "../AppleII/RomLoader.h"
 #include "../Tools/Settings.h"
 #include "../Tools/KeyboardLayouts.h"
+#include "../Tools/Bootloader.h"
 
 extern fabgl::Keyboard *keyboard_ptr;
 
@@ -349,7 +350,7 @@ void Supervisor::Render(VGA* vgaOut)
 		// the choice is already in NVS; show it long enough to read
 		RenderRestarting();
 		delay(400);
-		ESP.restart();
+		Bootloader::Restart();               // back into this app, not the menu
 	}
 	else
 		RenderBrowse();
@@ -413,7 +414,11 @@ void Supervisor::RenderAbout()
 	DrawText(2, 7, "KEYBOARD", C_YELLOW, C_BG);
 	DrawText(13, 7, GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name, C_WHITE, C_BG);
 	DrawText(2, 8, "VERSION", C_YELLOW, C_BG);
+#if BUILD_TARGET == BUILD_TARGET_BOOTLOADER
+	DrawText(13, 8, FW_VERSION_STR " (SD BOOTLOADER)", C_WHITE, C_BG);
+#else
 	DrawText(13, 8, FW_VERSION_STR, C_WHITE, C_BG);
+#endif
 	DrawText(2, 9, "BUILT", C_YELLOW, C_BG);
 	DrawText(13, 9, FW_BUILD_DATE, C_WHITE, C_BG);
 

@@ -39,6 +39,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 - Two emulated Disk II drives with nibblized (`.nib`) disk images
 - **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount `.nib` images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with `[ MACHINE ]`, or open `[ ABOUT ]` for the firmware version and credits. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
+- **Runs standalone or under [ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader)**: flash it on its own over USB, or put it on the SD card as one entry in the bootloader's multi-emulator menu. Every release ships both builds (see [ESP32_Bootloader](#esp32_bootloader-sd-card-menu))
 - **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
 - Boots to BASIC with no disk mounted; the Disk II boot PROM is only visible to the machine while a disk is mounted, so `PR#6` and the boot-time slot scan always behave
 
@@ -58,12 +59,12 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 
 If you just want to run the emulator without building from source, grab the pre-built firmware and use the browser-based flasher — no toolchain, no drivers to install beyond your board's USB-serial driver.
 
-1. Download `ESP32-AppleII-v0.4.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
+1. Download `ESP32-AppleII-v0.5.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
 2. Connect your TTGO VGA32 board via USB
 3. Open [ESP Web Tool](https://espressif.github.io/esptool-js/) in a Chrome or Edge browser
 4. Click **Connect** and select the board's serial port
 5. Set the flash offset to `0x0000`
-6. Choose the downloaded `ESP32-AppleII-v0.4.0.bin`
+6. Choose the downloaded `ESP32-AppleII-v0.5.0.bin`
 7. Click **Program** and wait for the flash to complete
 
 Hold the **BOOT** button on the board while clicking **Connect** if the browser cannot reach the device.
@@ -78,10 +79,51 @@ Same binary, if you'd rather not use a browser:
 
 ```bash
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-AppleII-v0.4.0.bin
+  write_flash 0x0 ESP32-AppleII-v0.5.0.bin
 ```
 
 Depending on the board's USB-serial chip the port may enumerate as `/dev/ttyACM0` instead of `/dev/ttyUSB0`.
+
+### ESP32_Bootloader (SD-card menu)
+
+[ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader) turns the board into an SD-card emulator loader. It is flashed once, and at power-up it shows a menu of every emulator on the card. This emulator can be one of them, next to other TTGO VGA32 emulators, without reflashing over USB.
+
+Each release carries two builds. Use the one that matches how you run the board:
+
+| You want | Release files | Install |
+|---|---|---|
+| Only this emulator, flashed over USB | `ESP32-AppleII-v0.5.0.bin` | at offset `0x0`, as above |
+| This emulator in the ESP32_Bootloader menu | `firmware.bin` + `version.txt` | on the SD card, as below |
+
+The two are not interchangeable: `firmware.bin` is built to hand the board back to the bootloader, and the standalone image is not.
+
+**1. Install the bootloader (once).** Flash ESP32_Bootloader following [its own instructions](https://github.com/ESP-WORKS/ESP32_Bootloader). It replaces whatever was on the board, this emulator included.
+
+**2. Put the emulator on the card.** Download `firmware.bin` and `version.txt` from the [release](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases), and put both in a folder named `AppleII` at the root of the card. Keep `/roms` and your `.nib` images where they always are; the bootloader and the emulator share the card.
+
+```
+SD card root
+├── AppleII/          <- the menu shows the folder name
+│   ├── firmware.bin
+│   └── version.txt
+├── roms/             <- //e ROMs, as usual
+├── Games/            <- your .nib images, anywhere
+└── <other emulators>/
+```
+
+If `firmware.bin` and `version.txt` sit in the card root instead of a folder, the bootloader skips the menu and always starts this emulator.
+
+**3. Start it.** Power on, highlight **AppleII** with the arrow keys and press Enter. The first time, the bootloader shows its flashing progress and then the emulator boots. After that it starts right away.
+
+**Everyday use**
+
+- **Power cycle** to get back to the bootloader menu, and pick another emulator from there.
+- **`[ MACHINE ]`** switches between the ][+ and the //e and restarts straight into the emulator, not the menu.
+- **`[ ABOUT ]`** shows `0.5.0 (SD BOOTLOADER)` in this build, so you can tell which one is running.
+- **Updating:** replace both files in `AppleII/` with the ones from the new release. The bootloader reflashes only when `version.txt` changes, so always copy both.
+- **Settings** (machine, keyboard layout) are kept in the board's NVS, which the bootloader shares, so they carry over between sessions. They are lost if the whole flash is erased.
+
+To build `firmware.bin` and `version.txt` yourself, see [Build from source](#build-from-source).
 
 ### Build from source
 
@@ -101,7 +143,15 @@ To produce a release image of your own — bootloader + partition table + boot_a
 tools/build-firmware.sh          # output in build/, plus SHA256SUMS
 ```
 
-The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.4.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
+The same run also builds the ESP32_Bootloader flavour into `build/sdcard/AppleII/` (`firmware.bin` + `version.txt`, ready to copy to the card). To build only that one:
+
+```bash
+tools/package-bootloader.sh      # output in build/sdcard/AppleII/
+```
+
+It is the same source compiled with `-DBUILD_TARGET=1` (see [`src/BuildConfig.h`](src/BuildConfig.h)). The standalone build stays the default.
+
+The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.5.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
 
 The CPU cores have host-side tests that run on the build machine rather than the ESP32 (they need `g++` and `curl`, and download the test images on first run):
 
