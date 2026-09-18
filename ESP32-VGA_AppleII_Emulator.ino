@@ -27,6 +27,8 @@
 #include "src/VGA/VGA.h"
 #include "src/Tools/Log.h"
 #include "src/Supervisor/Supervisor.h"
+#include "src/Tools/Bootloader.h"
+#include "src/Version.h"
 
 // Global pointer to keyboard for Apple2Device to read from
 fabgl::Keyboard *keyboard_ptr = nullptr;
@@ -78,7 +80,12 @@ static bool emulationInLoop = false;
 
 void setup()
 {
+    // ESP32_Bootloader builds: hand the next power-up back to its menu. First,
+    // before anything else can fail or hang. A no-op in the standalone build.
+    Bootloader::ReleaseOtadata();
+
     Serial.begin(115200);
+    Serial.printf("\nESP32-AppleII v%s (%s build)\n", FW_VERSION_STR, Bootloader::TargetName());
     
     // Audio pin. GPIO 26 belongs to the mouse port (PS/2 clock).
     pinMode(25, OUTPUT);

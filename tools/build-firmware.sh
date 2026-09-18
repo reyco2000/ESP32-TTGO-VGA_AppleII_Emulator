@@ -11,7 +11,9 @@
 #           bootloader / partition table / boot_app0 / app images
 #           into one flashable file at offset 0x0, and writes
 #           SHA256 checksums. Output lands in build/, with the
-#           final image named ESP32-AppleII-v<version>.bin.
+#           final image named ESP32-AppleII-v<version>.bin. Then
+#           builds the ESP32_Bootloader flavour too, via
+#           tools/package-bootloader.sh, into build/sdcard/AppleII/.
 # ============================================================
 #
 # Usage:  tools/build-firmware.sh [output-dir]
@@ -38,6 +40,7 @@ command -v arduino-cli >/dev/null || { echo "error: arduino-cli not found in PAT
 echo "==> Cleaning $OUT_DIR"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"       # later steps cd elsewhere
 
 echo "==> Building ESP32-AppleII v$FW_VERSION"
 echo "==> Compiling ($FQBN)"
@@ -72,10 +75,22 @@ rm -f "$OUT_DIR/$NAME.ino.elf" "$OUT_DIR/$NAME.ino.map"
 # and keep the names arduino-cli and the core give them.
 mv "$OUT_DIR/$NAME.ino.bin" "$OUT_DIR/$RELEASE_NAME-app.bin"
 
+# The SD-card flavour for ESP32_Bootloader: the same sources built with
+# -DBUILD_TARGET=1. Its version.txt comes from git describe, so tag a release
+# before running this.
+echo "==> ESP32_Bootloader build"
+OUT_DIR="$OUT_DIR" "$SKETCH_DIR/tools/package-bootloader.sh"
+rm -rf "$OUT_DIR/bootloader"            # build intermediates; the package is in sdcard/
+
 echo "==> Checksums"
-( cd "$OUT_DIR" && sha256sum ./*.bin > SHA256SUMS && cat SHA256SUMS )
+# firmware.bin and version.txt are listed without their folder: they are
+# release assets too, and get downloaded side by side with the rest.
+( cd "$OUT_DIR" && sha256sum ./*.bin > SHA256SUMS )
+( cd "$OUT_DIR/sdcard/AppleII" && sha256sum firmware.bin version.txt >> "$OUT_DIR/SHA256SUMS" )
+cat "$OUT_DIR/SHA256SUMS"
 
 echo
 echo "Firmware v$FW_VERSION ready in $OUT_DIR"
 echo "  flash $RELEASE_NAME.bin at offset 0x0"
-ls -la "$OUT_DIR"
+echo "  or copy $OUT_DIR/sdcard/AppleII/ to the SD card root for ESP32_Bootloader"
+ls -la "$OUT_DIR" "$OUT_DIR"/sdcard/*

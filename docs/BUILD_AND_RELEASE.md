@@ -30,7 +30,8 @@ tools/build-firmware.sh
 ```
 
 It compiles with the release FQBN, merges the four flash images into a single
-file, drops the `.elf`/`.map` build intermediates, and writes `SHA256SUMS`.
+file, drops the `.elf`/`.map` build intermediates, builds the
+[ESP32_Bootloader](#esp32_bootloader-build) flavour, and writes `SHA256SUMS`.
 Output goes to `build/` (git-ignored — binaries are published as release assets,
 not committed).
 
@@ -56,11 +57,66 @@ Artifacts in `build/` (at `FW_VERSION=0.2.0`):
 | `ESP32-VGA_AppleII_Emulator.ino.bootloader.bin` | bootloader, `0x1000` |
 | `ESP32-VGA_AppleII_Emulator.ino.partitions.bin` | partition table, `0x8000` |
 | `boot_app0.bin` | OTA selector, `0xe000` |
+| `sdcard/AppleII/firmware.bin` | ESP32_Bootloader build — bare app image for the SD card |
+| `sdcard/AppleII/version.txt` | ESP32_Bootloader version string |
 | `SHA256SUMS` | checksums for all of the above |
 
 The two publishable images carry the version; the bootloader, partition table
 and OTA selector are version-neutral and keep the names arduino-cli and the
 esp32 core give them.
+
+### ESP32_Bootloader build
+
+[ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader) lives in the
+`factory` partition and flashes an app from the SD card into `ota_0`
+(`0x130000`, 2816 KB). `tools/package-bootloader.sh` builds that flavour on its
+own; `build-firmware.sh` runs it as well:
+
+```bash
+tools/package-bootloader.sh [version]   # -> build/sdcard/AppleII/{firmware.bin,version.txt}
+```
+
+- The build target is selected by `BUILD_TARGET` in
+  [`src/BuildConfig.h`](../src/BuildConfig.h). The default is standalone, and the
+  script passes `-DBUILD_TARGET=1` through **both** `compiler.c.extra_flags` and
+  `compiler.cpp.extra_flags`. No source edit is needed.
+- In that build [`src/Tools/Bootloader.h`](../src/Tools/Bootloader.h) erases
+  `otadata` as the first statement of `setup()`, so the next power-up goes back
+  to the bootloader menu. The machine switch's restart first selects the running
+  partition again (`esp_ota_set_boot_partition`), so it comes back into the
+  emulator instead of the menu. In the standalone build both are compiled out.
+- The FQBN, including `PartitionScheme=huge_app`, is the same as the standalone
+  one. An app image carries no partition table, and runs at any 64K-aligned
+  offset. **Do not add a `partitions.csv`** to make it "match" the bootloader.
+- `firmware.bin` must be the bare app image. The script refuses anything that
+  does not start with `0xE9` or does not fit `ota_0`.
+- `version.txt` defaults to `AppleII_<git describe --tags --always --dirty>`.
+  **The bootloader only reflashes when `version.txt` changes**, so a rebuild
+  with an unchanged version silently keeps running the old app. That is why a
+  release is tagged *before* it is built (see the checklist). A `-dirty` version
+  prints a warning and must never be released.
+
+To check that the flag reached the code, the bootloader build's `setup()` must
+start by calling `esp_partition_find_first` and `esp_partition_erase_range`,
+and the standalone one must not call them:
+
+```bash
+TC=$(ls -d ~/.arduino15/packages/esp32/tools/xtensa-esp32-elf-gcc/*/bin | tail -1)
+ELF=build/bootloader/ESP32-VGA_AppleII_Emulator.ino.elf   # package-bootloader.sh alone keeps it
+addr=$($TC/xtensa-esp32-elf-nm "$ELF" | awk '$3=="_Z5setupv"{print $1}')
+$TC/xtensa-esp32-elf-objdump -d --start-address=0x$addr \
+  --stop-address=$((0x$addr + 0xc0)) "$ELF" | grep -oE "call8?\s+\S+ <[^>]+>"
+```
+
+On hardware, with the bootloader flashed and `AppleII/` on the card:
+
+1. Pick **AppleII**: it flashes, then boots the ][+ (the serial log says
+   `(ESP32_Bootloader build)`)
+2. Power-cycle: you must land in the **bootloader menu**. If the emulator starts
+   instead, the `otadata` erase did not run
+3. Pick it again: it boots with no reflash
+4. `[ MACHINE ]` switch: it restarts straight into the other model, not the menu
+5. Change only `version.txt`: it reflashes
 
 ### Doing it by hand
 
@@ -136,6 +192,8 @@ gh release create "$VERSION" \
   --notes "Apple II emulator firmware for ESP32-TTGO-VGA (VGA32 v1.4)." \
   "build/ESP32-AppleII-$VERSION.bin" \
   "build/ESP32-AppleII-$VERSION-app.bin" \
+  build/sdcard/AppleII/firmware.bin \
+  build/sdcard/AppleII/version.txt \
   build/SHA256SUMS
 ```
 
@@ -159,16 +217,22 @@ Or drop the merged `.bin` at offset `0x0` into
 [ESP Web Tools / esptool-js](https://espressif.github.io/esptool-js/) in a
 Chrome-based browser — no toolchain needed.
 
+For ESP32_Bootloader users: put `firmware.bin` and `version.txt` in an
+`AppleII/` folder at the SD card root, next to `/roms` and the disk images.
+
 ## Checklist for a release
 
 1. Bump `FW_VERSION_STR` in `src/Version.h`
-2. `tools/build-firmware.sh` — clean build, no warnings that matter
-3. `tests/host/run-cpu-tests.sh` — both CPU suites must PASS
-4. `tests/host/run-layout-tests.sh` — the keyboard layout tables must PASS
-5. Flash to hardware and confirm it boots to BASIC, F1 supervisor opens (check
-   `[ ABOUT ]` reports the version you just bumped), F2 FPS toggles. With the
-   //e ROMs in `/roms`, switch to the //e in `[ MACHINE ]`: it must restart into
-   the "Apple //e" screen, and `PR#3` must give 80 columns; switch back to the ][+
-6. Commit and push the source
-7. Tag with the same version, push the tag, `gh release create` with the merged
-   binary and `SHA256SUMS`
+2. `tests/host/run-cpu-tests.sh` — both CPU suites must PASS
+3. `tests/host/run-layout-tests.sh` — the keyboard layout tables must PASS
+4. Build a test image and flash it to hardware. Confirm it boots to BASIC, the F1
+   supervisor opens (check `[ ABOUT ]` reports the version you just bumped), and
+   F2 toggles FPS. With the //e ROMs in `/roms`, switch to the //e in
+   `[ MACHINE ]`: it must restart into the "Apple //e" screen, and `PR#3` must
+   give 80 columns; switch back to the ][+. Run the ESP32_Bootloader hardware
+   checks above as well
+5. Commit the source, then tag it with the same version (`git tag -a vX.Y.Z`)
+6. `tools/build-firmware.sh` **after** tagging, so `version.txt` is exactly
+   `AppleII_vX.Y.Z` and not `-dirty` — clean build, no warnings that matter
+7. Push the commit and the tag, then `gh release create` with the merged binary,
+   the `-app.bin`, `firmware.bin`, `version.txt` and `SHA256SUMS`
