@@ -8,7 +8,8 @@
  * ============================================================
  *  File   : DiskIICard.cpp
  *  Module : Disk II controller card. Two drives backed by nibblized
- *           .nib images read from SD: head stepping from the four
+ *           images read from SD - .nib as is, .dsk/.do/.po sector
+ *           images nibblized when mounted: head stepping from the four
  *           phase switches, drive select, motor, and the shift/load
  *           data latch at registers $C-$F. Shows its boot PROM only
  *           while a disk is inserted.
@@ -16,6 +17,8 @@
 */
 
 #include "DiskIICard.h"
+
+static_assert(DskImage::NIB_BYTES == DISKSIZE, "nibblized sector images fill the drive buffer");
 
 DiskIICard::DiskIICard()
 {
@@ -86,7 +89,7 @@ BYTE DiskIICard::Io(int reg, BYTE value, bool write)
 			int idx = disk[currentDrive].track * 0x1A00 + disk[currentDrive].nibble;
 			if (idx < 0 || idx >= DISKSIZE)
 			{
-				// head parked beyond the 35 tracks a .nib actually holds:
+				// head parked beyond the 35 tracks an image actually holds:
 				// leave the latch alone rather than running off the buffer
 			}
 			else if (disk[currentDrive].writeMode)
@@ -120,13 +123,37 @@ BYTE DiskIICard::Io(int reg, BYTE value, bool write)
 // Apple Disk II
 bool DiskIICard::InsertFloppy(const char* filename, int drv)
 {
-	int readlen = filesystem.ReadFile(filename, disk[drv].data, DISKSIZE);
-	if ( readlen != DISKSIZE)
+	DskImage::ImageType type = DskImage::TypeFromPath(filename);
+	if (type == DskImage::IMAGE_NIB)
 	{
-		Serial.printf("Read Floppy Fail : %s\n",filename);
+		int readlen = filesystem.ReadFile(filename, disk[drv].data, DISKSIZE);
+		if (readlen != DISKSIZE)
+		{
+			Serial.printf("Read Floppy Fail : %s\n",filename);
+			return false;
+		}
+	}
+	else if (type == DskImage::IMAGE_DOS || type == DskImage::IMAGE_PRODOS)
+	{
+		// 140K sector image: read to the tail of the drive buffer, then
+		// nibblize it in place into the tracks Io() streams
+		BYTE* tail = disk[drv].data + (DISKSIZE - DskImage::IMAGE_BYTES);
+		size_t size = 0;
+		int readlen = filesystem.ReadFile(filename, tail, DskImage::IMAGE_BYTES, &size);
+		if (readlen != DskImage::IMAGE_BYTES || size != (size_t)DskImage::IMAGE_BYTES)
+		{
+			// 800K .po, .2mg headers and short files all end up here
+			Serial.printf("Read Floppy Fail : %s (%u bytes, want %d)\n", filename, (unsigned)size, DskImage::IMAGE_BYTES);
+			return false;
+		}
+		DskImage::NibblizeInPlace(disk[drv].data,
+			type == DskImage::IMAGE_PRODOS ? DskImage::ORDER_PRODOS : DskImage::ORDER_DOS);
+	}
+	else
+	{
+		Serial.printf("Read Floppy Fail : %s (not a .nib, .dsk, .do or .po)\n", filename);
 		return false;
 	}
-
 
 	Serial.printf("Read Floppy OK : %s\n",filename);
 	sprintf(disk[drv].filename, "%s", filename);

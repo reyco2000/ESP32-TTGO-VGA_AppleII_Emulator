@@ -1,6 +1,11 @@
 # ESP32-VGA Apple II Emulator
 
-An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.nib` floppy disk images are loaded from an SD card — no host computer involved.
+An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images are loaded from an SD card — no host computer involved.
+
+## What's new in 0.6.0
+
+- **`.dsk`, `.do` and `.po` disk images mount directly.** 140K DOS 3.3 and ProDOS sector images are converted into Disk II nibble tracks in memory at mount time, so they no longer need to be converted to `.nib` on a computer first. The F1 browser lists them next to `.nib` files. Files of any other size, such as 800K `.po` or CoCo `.DSK` images, are turned away and leave the drive empty.
+- Writes to a disk still stay in memory only; nothing is saved back to the card, for any format.
 
 ## Screenshots
 
@@ -36,8 +41,8 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
   - **Apple //e (enhanced)** — 65C02, 128K with the auxiliary 64K, 80-column text, lowercase and MouseText. Needs its ROM files on the SD card (see [ROM files](#rom-files)).
 - 6502 and 65C02 CPU cores checked against Klaus Dormann's functional test suites, run on the build machine (`tests/host/run-cpu-tests.sh`)
 - Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not yet verified — see TODO)
-- Two emulated Disk II drives with nibblized (`.nib`) disk images
-- **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount `.nib` images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with `[ MACHINE ]`, or open `[ ABOUT ]` for the firmware version and credits. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
+- **Two emulated Disk II drives** that take 140K sector images (`.dsk` / `.do` in DOS 3.3 order, `.po` in ProDOS order) and nibblized `.nib` images
+- **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount disk images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with `[ MACHINE ]`, or open `[ ABOUT ]` for the firmware version and credits. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
 - **Runs standalone or under [ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader)**: flash it on its own over USB, or put it on the SD card as one entry in the bootloader's multi-emulator menu. Every release ships both builds (see [ESP32_Bootloader](#esp32_bootloader-sd-card-menu))
 - **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
@@ -59,12 +64,12 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 
 If you just want to run the emulator without building from source, grab the pre-built firmware and use the browser-based flasher — no toolchain, no drivers to install beyond your board's USB-serial driver.
 
-1. Download `ESP32-AppleII-v0.5.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
+1. Download `ESP32-AppleII-v0.6.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
 2. Connect your TTGO VGA32 board via USB
 3. Open [ESP Web Tool](https://espressif.github.io/esptool-js/) in a Chrome or Edge browser
 4. Click **Connect** and select the board's serial port
 5. Set the flash offset to `0x0000`
-6. Choose the downloaded `ESP32-AppleII-v0.5.0.bin`
+6. Choose the downloaded `ESP32-AppleII-v0.6.0.bin`
 7. Click **Program** and wait for the flash to complete
 
 Hold the **BOOT** button on the board while clicking **Connect** if the browser cannot reach the device.
@@ -79,7 +84,7 @@ Same binary, if you'd rather not use a browser:
 
 ```bash
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-AppleII-v0.5.0.bin
+  write_flash 0x0 ESP32-AppleII-v0.6.0.bin
 ```
 
 Depending on the board's USB-serial chip the port may enumerate as `/dev/ttyACM0` instead of `/dev/ttyUSB0`.
@@ -92,14 +97,14 @@ Each release carries two builds. Use the one that matches how you run the board:
 
 | You want | Release files | Install |
 |---|---|---|
-| Only this emulator, flashed over USB | `ESP32-AppleII-v0.5.0.bin` | at offset `0x0`, as above |
+| Only this emulator, flashed over USB | `ESP32-AppleII-v0.6.0.bin` | at offset `0x0`, as above |
 | This emulator in the ESP32_Bootloader menu | `firmware.bin` + `version.txt` | on the SD card, as below |
 
 The two are not interchangeable: `firmware.bin` is built to hand the board back to the bootloader, and the standalone image is not.
 
 **1. Install the bootloader (once).** Flash ESP32_Bootloader following [its own instructions](https://github.com/ESP-WORKS/ESP32_Bootloader). It replaces whatever was on the board, this emulator included.
 
-**2. Put the emulator on the card.** Download `firmware.bin` and `version.txt` from the [release](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases), and put both in a folder named `AppleII` at the root of the card. Keep `/roms` and your `.nib` images where they always are; the bootloader and the emulator share the card.
+**2. Put the emulator on the card.** Download `firmware.bin` and `version.txt` from the [release](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases), and put both in a folder named `AppleII` at the root of the card. Keep `/roms` and your disk images where they always are; the bootloader and the emulator share the card.
 
 ```
 SD card root
@@ -107,7 +112,7 @@ SD card root
 │   ├── firmware.bin
 │   └── version.txt
 ├── roms/             <- //e ROMs, as usual
-├── Games/            <- your .nib images, anywhere
+├── Games/            <- your disk images, anywhere
 └── <other emulators>/
 ```
 
@@ -119,7 +124,7 @@ If `firmware.bin` and `version.txt` sit in the card root instead of a folder, th
 
 - **Power cycle** to get back to the bootloader menu, and pick another emulator from there.
 - **`[ MACHINE ]`** switches between the ][+ and the //e and restarts straight into the emulator, not the menu.
-- **`[ ABOUT ]`** shows `0.5.0 (SD BOOTLOADER)` in this build, so you can tell which one is running.
+- **`[ ABOUT ]`** shows `0.6.0 (SD BOOTLOADER)` in this build, so you can tell which one is running.
 - **Updating:** replace both files in `AppleII/` with the ones from the new release. The bootloader reflashes only when `version.txt` changes, so always copy both.
 - **Settings** (machine, keyboard layout) are kept in the board's NVS, which the bootloader shares, so they carry over between sessions. They are lost if the whole flash is erased.
 
@@ -151,24 +156,25 @@ tools/package-bootloader.sh      # output in build/sdcard/AppleII/
 
 It is the same source compiled with `-DBUILD_TARGET=1` (see [`src/BuildConfig.h`](src/BuildConfig.h)). The standalone build stays the default.
 
-The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.5.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
+The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.6.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
 
 The CPU cores have host-side tests that run on the build machine rather than the ESP32 (they need `g++` and `curl`, and download the test images on first run):
 
 ```bash
 tests/host/run-cpu-tests.sh      # Klaus Dormann's 6502 and 65C02 suites, both must PASS
+tests/host/run-dsk-tests.sh      # .dsk/.po nibblizer, round-tripped through an RWTS-style decoder
 ```
 
 ## SD Card Setup
 
 1. Format the card as FAT32
-2. Copy `.nib` disk images onto it — either in the root or in subdirectories, the F1 browser walks both. Sample images are in [`data/`](data/)
+2. Copy `.dsk`, `.do`, `.po` or `.nib` disk images onto it — either in the root or in subdirectories, the F1 browser walks both. Sample images are in [`data/`](data/)
 3. For the Apple //e, create a `roms` folder and copy its ROM files into it (below)
 4. Insert the card before powering on
 
 The card is driven over SPI on the VGA32's on-board socket — SCK 14, MISO 2, MOSI 12, CS 13 — which matters only if you are adapting the firmware to a different board.
 
-`.nib` (nibblized) is the only supported image format; `.dsk` and `.po` images need to be converted first. With no card or no disk mounted the machine still boots straight to BASIC.
+Supported formats are 140K 5.25" images: `.dsk` and `.do` (DOS 3.3 sector order), `.po` (ProDOS sector order) and `.nib` (nibblized). Sector images are converted to nibbles in memory when mounted, so they need no conversion beforehand; copy-protected software generally needs a `.nib`. 800K `.po`, `.2mg` and `.woz` images are not supported. Writes to a mounted disk last until it is unmounted or the board powers off — nothing is saved back to the card, whatever the format. With no card or no disk mounted the machine still boots straight to BASIC.
 
 ### ROM files
 
@@ -192,7 +198,7 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 ## Usage
 
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
-- Press **F1** to open the supervisor menu: arrow keys to move, **Enter** to open a directory or select a `.nib` (then `1`/`2` picks the drive), **ESC** to resume emulation. `[ ABOUT ]` shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
+- Press **F1** to open the supervisor menu: arrow keys to move, **Enter** to open a directory or select a disk image (then `1`/`2` picks the drive), **ESC** to resume emulation. `[ ABOUT ]` shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
 - `[ MACHINE ]` switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
 - `[ KEYBOARD ]` picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
 - Use the menu's `[ RESET MACHINE ]` item (or `PR#6` from BASIC) to boot a mounted disk.

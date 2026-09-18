@@ -8,8 +8,9 @@
  * ============================================================
  *  File   : DiskIICard.h
  *  Module : Disk II controller card (interface). Two drives backed
- *           by nibblized .nib images read from SD, the head stepper
- *           and data latch, and the P5 boot PROM.
+ *           by nibblized images read from SD (.nib, or .dsk/.do/.po
+ *           converted on mount), the head stepper and data latch,
+ *           and the P5 boot PROM.
  * ============================================================
 */
 
@@ -18,6 +19,7 @@
 
 #include <string>
 #include "Card.h"
+#include "DskImage.h"
 #include "../Tools/Log.h"
 #include "../Tools/FileSystem.h"
 

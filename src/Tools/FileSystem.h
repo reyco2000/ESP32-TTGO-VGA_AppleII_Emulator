@@ -7,8 +7,9 @@
  *   MIT License
  * ============================================================
  *  File   : FileSystem.h
- *  Module : Small SD-card helper used to open and read .nib disk
- *           images from the emulated floppy drives.
+ *  Module : Small SD-card helper used to open and read ROMs and
+ *           the .nib / .dsk / .do / .po disk images of the emulated
+ *           floppy drives.
  * ============================================================
 */
 
@@ -49,7 +50,9 @@ public :
         return file;
     }
 
-    int ReadFile(const char *path, unsigned char *buffer, int len)
+    // Reads up to len bytes. With fileSize, also reports the file's whole
+    // length, so a caller can turn away a file that is longer than len.
+    int ReadFile(const char *path, unsigned char *buffer, int len, size_t *fileSize = nullptr)
     {
         File file = Open(path);
         if(!file)
@@ -58,6 +61,8 @@ public :
             return -1;
         }
 
+        if (fileSize)
+            *fileSize = file.size();
         int readlen = file.read(buffer, len);
         Serial.printf("- read from file : %d\n", readlen);
         file.close();
