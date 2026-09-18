@@ -224,7 +224,7 @@ For ESP32_Bootloader users: put `firmware.bin` and `version.txt` in an
 
 1. Bump `FW_VERSION_STR` in `src/Version.h`
 2. `tests/host/run-cpu-tests.sh` — both CPU suites must PASS
-3. `tests/host/run-layout-tests.sh` — the keyboard layout tables must PASS
+3. `tests/host/run-layout-tests.sh` — the keyboard layout tables must PASS; `tests/host/run-dsk-tests.sh` — the sector image nibblizer must PASS
 4. Build a test image and flash it to hardware. Confirm it boots to BASIC, the F1
    supervisor opens (check `[ ABOUT ]` reports the version you just bumped), and
    F2 toggles FPS. With the //e ROMs in `/roms`, switch to the //e in

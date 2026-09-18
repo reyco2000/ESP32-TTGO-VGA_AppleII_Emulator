@@ -8,8 +8,8 @@
  * ============================================================
  *  File   : Supervisor.cpp
  *  Module : F1 supervisor menu. Pauses emulation, browses the SD
- *           card and mounts/unmounts .nib images into either drive
- *           via Apple2Machine, and shows an ABOUT page with the
+ *           card and mounts/unmounts .nib/.dsk/.do/.po images into
+ *           either drive via Apple2Machine, and shows an ABOUT page with the
  *           firmware version and credits. Paints directly into the
  *           live VGA framebuffer in its own palette, repainting
  *           only when the dirty flag is set, and invalidates the
@@ -229,7 +229,7 @@ int Supervisor::RowColor(int index, bool selected, int* bg)
 	}
 	if (idx < entryCount && entries[idx].isDir)
 		return C_CYAN;
-	return C_WHITE;                          // .nib files
+	return C_WHITE;                          // disk images
 }
 
 void Supervisor::Update()
@@ -536,8 +536,7 @@ void Supervisor::ScanDir()
 			}
 			else
 			{
-				int len = strlen(name);
-				if (len > 4 && strcasecmp(name + len - 4, ".nib") == 0)
+				if (DskImage::TypeFromPath(name) != DskImage::IMAGE_NONE)
 				{
 					snprintf(entries[entryCount].name, SUP_NAME_LEN, "%s", name);
 					entries[entryCount].isDir = false;

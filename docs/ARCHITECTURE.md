@@ -91,9 +91,17 @@ sink page, so the write fast path needs no ROM check.
 or raw memory: the soft switches (the //e's `$C000`-`$C01F` block and its status
 bits in `IIeSwitch()`), the keyboard, the speaker and the slot cards. `$C090`-
 `$C0FF` goes to `slots[n]->Io()`, and `Memory` maps each card's `SlotRom()` at
-`$Cn00`. `DiskIICard` is slot 6: two drives of nibblized `.nib` images, read
-from SD into PSRAM via `Tools/FileSystem.h`. It hides its boot PROM while no disk
-is inserted, so the machine boots to BASIC instead of hanging on an empty drive.
+`$Cn00`. `DiskIICard` is slot 6: two drives of nibblized images in PSRAM, 35
+tracks of `0x1A00` nibbles each, read from SD via `Tools/FileSystem.h`. A `.nib`
+is loaded as is. A 140K `.dsk`/`.do`/`.po` is read into the tail of the same
+buffer and nibblized in place by `DskImage` (`src/AppleII/DskImage.*`, tested on
+the host by `tests/host/run-dsk-tests.sh`) as standard 16-sector 6-and-2 tracks,
+volume 254, with the DOS or ProDOS sector interleave picked by the extension.
+Each track's output ends before the next track's input begins, so it needs one
+4K track of scratch rather than a second disk buffer. Writes change only the
+nibble buffer; nothing goes back to the card. The card hides its boot PROM while
+no disk is inserted, so the machine boots to BASIC instead of hanging on an
+empty drive.
 
 The keyboard drains FabGL's event queue every frame and uses each event's own
 ASCII value — the character made with the modifiers as they were when the key
@@ -132,7 +140,7 @@ loads the 16 entries.
 
 **`Supervisor`** (`src/Supervisor/`) is the F1 menu. It pauses emulation (the
 frame loop skips `machine->Run()` while it is active), browses the SD card,
-mounts/unmounts `.nib` images via `Apple2Machine::Mount`/`Unmount`, switches
+mounts/unmounts disk images via `Apple2Machine::Mount`/`Unmount`, switches
 machine and shows `[ ABOUT ]`. It paints directly into the live framebuffer in
 its own palette and calls `Apple2Device::InvalidateRenderCache()` on close so the
 emulator repaints fully. Its font has no box-drawing glyphs and no lowercase
