@@ -39,7 +39,7 @@ not committed).
 
 `FW_VERSION_STR` in [`src/Version.h`](../src/Version.h) is the single source of
 truth for the release version. `tools/build-firmware.sh` parses it out of that
-header to name the output files, and the supervisor's `[ ABOUT ]` page displays
+header to name the output files, and the supervisor's ABOUT page displays
 it on screen, so the firmware always reports the version it was built as.
 **Bump it there for a new release**, then use the same number for the git tag.
 For a throwaway build, override it without editing anything:
@@ -115,7 +115,7 @@ On hardware, with the bootloader flashed and `AppleII/` on the card:
 2. Power-cycle: you must land in the **bootloader menu**. If the emulator starts
    instead, the `otadata` erase did not run
 3. Pick it again: it boots with no reflash
-4. `[ MACHINE ]` switch: it restarts straight into the other model, not the menu
+4. **MACHINE** switch: it restarts straight into the other model, not the menu
 5. Change only `version.txt`: it reflashes
 
 ### Doing it by hand
@@ -226,9 +226,9 @@ For ESP32_Bootloader users: put `firmware.bin` and `version.txt` in an
 2. `tests/host/run-cpu-tests.sh` — both CPU suites must PASS
 3. `tests/host/run-layout-tests.sh` — the keyboard layout tables must PASS; `tests/host/run-dsk-tests.sh` — the sector image nibblizer must PASS
 4. Build a test image and flash it to hardware. Confirm it boots to BASIC, the F1
-   supervisor opens (check `[ ABOUT ]` reports the version you just bumped), and
+   supervisor opens (check **ABOUT** reports the version you just bumped), and
    F2 toggles FPS. With the //e ROMs in `/roms`, switch to the //e in
-   `[ MACHINE ]`: it must restart into the "Apple //e" screen, and `PR#3` must
+   **MACHINE**: it must restart into the "Apple //e" screen, and `PR#3` must
    give 80 columns; switch back to the ][+. Run the ESP32_Bootloader hardware
    checks above as well
 5. Commit the source, then tag it with the same version (`git tag -a vX.Y.Z`)

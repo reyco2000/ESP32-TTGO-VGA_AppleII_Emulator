@@ -78,6 +78,34 @@ static const int stripe[6] = { C_GREEN, C_YELLOW, C_ORANGE,
 static inline int ColX(int col) { return SUP_ORIGIN_X + col * SUP_CELL_W; }
 static inline int RowY(int row) { return SUP_ORIGIN_Y + row * FONT_Y; }
 
+// Buttons sit between the two stripe rules (rows 2 and 7) in pixel space, off
+// the text grid, so each can have a 2px margin around its label. The unmount
+// row spans the columns above it: D1 under RESET+MACHINE, D2 under
+// KEYBOARD+ABOUT, which is also where UP/DOWN land.
+#define BTN_H     12
+#define BTN_TOP_Y 29
+#define BTN_BOT_Y 46
+
+struct ButtonRect { const char* label; int x, y, w; };
+static const ButtonRect buttonRects[BTN_COUNT] =
+{
+	{ "RESET",      40,  BTN_TOP_Y,  98 },
+	{ "MACHINE",    170, BTN_TOP_Y, 126 },
+	{ "KEYBOARD",   328, BTN_TOP_Y, 140 },
+	{ "ABOUT",      500, BTN_TOP_Y,  98 },
+	{ "UNMOUNT D1", 40,  BTN_BOT_Y, 256 },
+	{ "UNMOUNT D2", 328, BTN_BOT_Y, 270 },
+};
+
+static inline bool TopRow(int btn) { return btn <= BTN_ABOUT; }
+
+// file name without its directory, for the D1/D2 line and hints
+static const char* BaseName(const char* path)
+{
+	const char* p = strrchr(path, '/');
+	return p ? p + 1 : path;
+}
+
 Supervisor::Supervisor(Apple2Machine* m)
 {
 	machine = m;
@@ -90,6 +118,9 @@ Supervisor::Supervisor(Apple2Machine* m)
 	strcpy(curPath, "/");
 	entryCount = 0;
 	sdError = false;
+	focusBtn = BTN_RESET;
+	lastTop = BTN_RESET;
+	lastBottom = BTN_UNMOUNT1;
 	cursor = 0;
 	scroll = 0;
 	status[0] = '\0';
@@ -111,6 +142,8 @@ void Supervisor::Open()
 	dirty = true;
 	paletteSet = false;
 	mode = BROWSE;
+	focusBtn = lastTop = BTN_RESET;
+	lastBottom = BTN_UNMOUNT1;
 	SetStatus("");
 	// why the saved model could not boot, if it could not: said once
 	if (!bootNoteShown && machine->bootNote[0])
@@ -118,6 +151,8 @@ void Supervisor::Open()
 		SetStatus(machine->bootNote);
 		bootNoteShown = true;
 	}
+	else
+		ButtonHint(focusBtn);
 	ScanDir();
 	if (sdError && !AtRoot())
 	{
@@ -140,17 +175,24 @@ void Supervisor::SetStatus(const char* msg)
 }
 
 // ASCII -> Apple II font glyph: identity for 0x20-0x5F, no lowercase in the font
-void Supervisor::DrawText(int col, int row, const char* text, int fg, int bg)
+void Supervisor::DrawTextXY(int x, int y, const char* text, int fg, int bg)
 {
-	for (int i = 0; text[i] != '\0' && (col + i) < SCREENTEXT_X; i++)
+	for (int i = 0; text[i] != '\0'; i++)
 	{
 		BYTE g = (BYTE)text[i];
 		if (g >= 'a' && g <= 'z')
 			g -= 32;
 		if (g < 0x20 || g > 0x5F)
 			g = 0x20;
-		font.RenderFont(vga, g, ColX(col + i), RowY(row), false, fg, bg);
+		font.RenderFont(vga, g, x + i * SUP_CELL_W, y, false, fg, bg);
 	}
+}
+
+void Supervisor::DrawText(int col, int row, const char* text, int fg, int bg)
+{
+	char clip[SCREENTEXT_X + 1];
+	snprintf(clip, sizeof(clip), "%.*s", SCREENTEXT_X - col, text);
+	DrawTextXY(ColX(col), RowY(row), clip, fg, bg);
 }
 
 // full 40-column row: pads with spaces (so selection bars span the line),
@@ -194,16 +236,69 @@ void Supervisor::DrawRule(int row)
 	}
 }
 
-// Page field plus the vertical stripe accent in the right margin.
-void Supervisor::DrawChrome()
+// Page field plus the vertical stripe accent in the right margin, alongside
+// the list window.
+void Supervisor::DrawChrome(int listTop, int listRows)
 {
 	vga->clear(C_BG);
 
-	int top    = RowY(SUP_LIST_TOP);
-	int bottom = RowY(SUP_LIST_TOP + SUP_LIST_ROWS);
+	int top    = RowY(listTop);
+	int bottom = RowY(listTop + listRows);
 	int band   = (bottom - top) / 6;
 	for (int i = 0; i < 6; i++)
 		vga->fillRect(612, top + i * band, 16, band, stripe[i]);
+}
+
+// "D1: NAME" in a 20-column half of the disk line; names that do not fit
+// end in '~' like DrawRow's.
+void Supervisor::DrawDiskSlot(int col, int drive)
+{
+	char label[4] = { 'D', (char)('1' + drive), ':', '\0' };
+	DrawText(col, 1, label, C_GREY, C_BG);
+
+	std::string path = machine->device.GetDiskName(drive);
+	if (path.empty())
+	{
+		DrawText(col + 4, 1, "(EMPTY)", C_GREY, C_BG);
+		return;
+	}
+
+	const int room = 15;                     // leaves a space before D2
+	char name[room + 1];
+	const char* base = BaseName(path.c_str());
+	if ((int)strlen(base) > room)
+	{
+		memcpy(name, base, room - 1);
+		name[room - 1] = '~';
+		name[room] = '\0';
+	}
+	else
+		snprintf(name, sizeof(name), "%s", base);
+	DrawText(col + 4, 1, name, C_GREEN, C_BG);
+}
+
+// Raised button: light top/left edge, dark bottom/right edge and a 1px drop
+// shadow. The focused one takes the selection bar's cyan; an unmount button
+// with nothing to unmount has a dimmed label.
+void Supervisor::DrawButton(int btn)
+{
+	const ButtonRect& r = buttonRects[btn];
+	bool focused = (btn == focusBtn);
+	bool idle = (btn == BTN_UNMOUNT1 && !machine->device.HasFloppy(0)) ||
+	            (btn == BTN_UNMOUNT2 && !machine->device.HasFloppy(1));
+	int face = focused ? C_CYAN : C_GREY;
+	int text = (idle && !focused) ? C_DIM : C_BLACK;
+
+	vga->fillRect(r.x, r.y, r.w, BTN_H, face);
+	vga->fillRect(r.x, r.y, r.w, 1, C_WHITE);
+	vga->fillRect(r.x, r.y, 1, BTN_H, C_WHITE);
+	vga->fillRect(r.x, r.y + BTN_H - 1, r.w, 1, C_BLACK);
+	vga->fillRect(r.x + r.w - 1, r.y, 1, BTN_H, C_BLACK);
+	vga->fillRect(r.x + 1, r.y + BTN_H, r.w, 1, C_BLACK);
+	vga->fillRect(r.x + r.w, r.y + 1, 1, BTN_H, C_BLACK);
+
+	int tw = strlen(r.label) * SUP_CELL_W;
+	DrawTextXY(r.x + (r.w - tw) / 2, r.y + 2, r.label, text, face);
 }
 
 // Colour for one list row. The selection bar is a swapped fg/bg pair rather
@@ -217,10 +312,7 @@ int Supervisor::RowColor(int index, bool selected, int* bg)
 	}
 
 	*bg = C_BG;
-	if (index < SUP_ACTION_COUNT)
-		return C_YELLOW;                     // [ ... ] action items
-
-	int idx = index - SUP_ACTION_COUNT;
+	int idx = index;
 	if (!AtRoot())
 	{
 		if (idx == 0)
@@ -266,7 +358,7 @@ void Supervisor::Update()
 				ChooseMachine(machineCursor);
 			else if (vk == fabgl::VK_ESCAPE)
 			{
-				SetStatus("");
+				ButtonHint(focusBtn);
 				mode = BROWSE;
 			}
 			continue;
@@ -282,7 +374,7 @@ void Supervisor::Update()
 				ChooseKeyboard(keyboardCursor);
 			else if (vk == fabgl::VK_ESCAPE)
 			{
-				SetStatus("");
+				ButtonHint(focusBtn);
 				mode = BROWSE;
 			}
 			continue;
@@ -305,10 +397,15 @@ void Supervisor::Update()
 
 		switch (vk)
 		{
-			case fabgl::VK_UP:     MoveCursor(-1); break;
-			case fabgl::VK_DOWN:   MoveCursor(1);  break;
+			case fabgl::VK_UP:     MoveFocus(0, -1); break;
+			case fabgl::VK_DOWN:   MoveFocus(0, 1);  break;
+			case fabgl::VK_LEFT:   MoveFocus(-1, 0); break;
+			case fabgl::VK_RIGHT:  MoveFocus(1, 0);  break;
 			case fabgl::VK_RETURN:
-				Select();
+				if (ListFocused())
+					Select();
+				else
+					Press(focusBtn);
 				if (!active)
 					return;
 				break;
@@ -356,32 +453,32 @@ void Supervisor::Render(VGA* vgaOut)
 		RenderBrowse();
 }
 
+// Title, the D1/D2 line, a stripe, the two button rows, a stripe, then the
+// SD browser.
 void Supervisor::RenderBrowse()
 {
-	DrawChrome();
+	DrawChrome(SUP_FILES_TOP, SUP_FILES_ROWS);
 	DrawBar(0, "               SUPERVISOR", C_WHITE, C_BARBG);
 
-	char line[64];
-	std::string d1 = machine->device.GetDiskName(0);
-	std::string d2 = machine->device.GetDiskName(1);
-	snprintf(line, sizeof(line), "D1: %s", d1.empty() ? "(EMPTY)" : d1.c_str());
-	DrawRow(1, line, d1.empty() ? C_GREY : C_GREEN, C_BG);
-	snprintf(line, sizeof(line), "D2: %s", d2.empty() ? "(EMPTY)" : d2.c_str());
-	DrawRow(2, line, d2.empty() ? C_GREY : C_GREEN, C_BG);
+	DrawDiskSlot(0, 0);
+	DrawDiskSlot(20, 1);
+	DrawRule(2);
 
-	DrawRule(3);
+	for (int b = 0; b < BTN_COUNT; b++)
+		DrawButton(b);
+	DrawRule(7);
 
 	char label[SUP_NAME_LEN + 24];
 	int count = VirtualCount();
-	for (int i = 0; i < SUP_LIST_ROWS; i++)
+	for (int i = 0; i < SUP_FILES_ROWS; i++)
 	{
 		int idx = scroll + i;
 		if (idx >= count)
 			break;
 		VirtualLabel(idx, label, sizeof(label));
 		int bg;
-		int fg = RowColor(idx, idx == cursor, &bg);
-		DrawRow(SUP_LIST_TOP + i, label, fg, bg);
+		int fg = RowColor(idx, ListFocused() && idx == cursor, &bg);
+		DrawRow(SUP_FILES_TOP + i, label, fg, bg);
 	}
 
 	vga->fillRect(0, RowY(20) + 3, 320, 1, C_DIM);
@@ -437,49 +534,16 @@ void Supervisor::RenderAbout()
 }
 
 //////////////////////////////////////////////////////////////////////////
-// Virtual list: [0]=reset [1]=unmount d1 [2]=unmount d2 [3]=machine
-// [4]=keyboard [5]=about, then ".." when not at root, then the scanned entries
+// Virtual list: ".." when not at root, then the scanned entries
 
 int Supervisor::VirtualCount()
 {
-	return SUP_ACTION_COUNT + (AtRoot() ? 0 : 1) + entryCount;
+	return (AtRoot() ? 0 : 1) + entryCount;
 }
 
 void Supervisor::VirtualLabel(int index, char* out, int outlen)
 {
-	if (index == 0)
-	{
-		snprintf(out, outlen, " [ RESET MACHINE ]");
-		return;
-	}
-	if (index == 1 || index == 2)
-	{
-		int drv = index - 1;
-		std::string name = machine->device.GetDiskName(drv);
-		if (name.empty())
-			snprintf(out, outlen, " [ UNMOUNT DRIVE %d ]", drv + 1);
-		else
-			snprintf(out, outlen, " [ UNMOUNT D%d: %s ]", drv + 1, name.c_str());
-		return;
-	}
-	if (index == 3)
-	{
-		snprintf(out, outlen, " [ MACHINE: %s ]", machine->profile.name);
-		return;
-	}
-	if (index == 4)
-	{
-		snprintf(out, outlen, " [ KEYBOARD: %s ]",
-		         GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name);
-		return;
-	}
-	if (index == 5)
-	{
-		snprintf(out, outlen, " [ ABOUT ]");
-		return;
-	}
-
-	int idx = index - SUP_ACTION_COUNT;
+	int idx = index;
 	if (!AtRoot())
 	{
 		if (idx == 0)
@@ -583,49 +647,136 @@ void Supervisor::MoveCursor(int delta)
 	if (cursor < 0) cursor = 0;
 	if (cursor > count - 1) cursor = count - 1;
 	if (cursor < scroll) scroll = cursor;
-	if (cursor >= scroll + SUP_LIST_ROWS) scroll = cursor - SUP_LIST_ROWS + 1;
+	if (cursor >= scroll + SUP_FILES_ROWS) scroll = cursor - SUP_FILES_ROWS + 1;
+}
+
+// Arrow keys in BROWSE mode. LEFT/RIGHT walk a button row; UP/DOWN go
+// top row <-> unmount row <-> SD list, each row returning to the button
+// last focused on it. In the list LEFT/RIGHT do nothing.
+void Supervisor::MoveFocus(int dx, int dy)
+{
+	if (ListFocused())
+	{
+		if (dy < 0 && cursor == 0)
+			FocusButton(lastBottom);
+		else if (dy != 0)
+			MoveCursor(dy);
+		return;
+	}
+
+	int btn = focusBtn;
+	if (dx != 0)
+	{
+		int first = TopRow(btn) ? BTN_RESET : BTN_UNMOUNT1;
+		int last  = TopRow(btn) ? BTN_ABOUT : BTN_UNMOUNT2;
+		btn += dx;
+		if (btn >= first && btn <= last)
+			FocusButton(btn);
+		return;
+	}
+
+	if (dy > 0)
+	{
+		if (TopRow(btn))
+			FocusButton(lastBottom);
+		else if (VirtualCount() > 0)
+		{
+			focusBtn = BTN_NONE;
+			SetStatus("");
+			if (cursor >= VirtualCount())
+				cursor = 0;
+			MoveCursor(0);                   // brings the cursor into view
+		}
+	}
+	else if (dy < 0 && !TopRow(btn))
+		FocusButton(lastTop);
+}
+
+void Supervisor::FocusButton(int btn)
+{
+	focusBtn = btn;
+	if (TopRow(btn))
+		lastTop = btn;
+	else
+		lastBottom = btn;
+	ButtonHint(btn);
+}
+
+// Status-line text for the focused button; the machine and keyboard in use
+// live here since their names do not fit on the buttons.
+void Supervisor::ButtonHint(int btn)
+{
+	char msg[SCREENTEXT_X + 1];
+	switch (btn)
+	{
+		case BTN_RESET:
+			SetStatus("RESET THE EMULATED MACHINE");
+			break;
+		case BTN_MACHINE:
+			snprintf(msg, sizeof(msg), "MACHINE: %s", machine->profile.name);
+			SetStatus(msg);
+			break;
+		case BTN_KEYBOARD:
+			snprintf(msg, sizeof(msg), "KEYBOARD: %s",
+			         GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name);
+			SetStatus(msg);
+			break;
+		case BTN_ABOUT:
+			SetStatus("VERSION AND CREDITS");
+			break;
+		case BTN_UNMOUNT1:
+		case BTN_UNMOUNT2:
+		{
+			int drv = btn - BTN_UNMOUNT1;
+			std::string path = machine->device.GetDiskName(drv);
+			if (path.empty())
+				snprintf(msg, sizeof(msg), "DRIVE %d IS EMPTY", drv + 1);
+			else
+				snprintf(msg, sizeof(msg), "EJECT %s", BaseName(path.c_str()));
+			SetStatus(msg);
+			break;
+		}
+	}
+}
+
+void Supervisor::Press(int btn)
+{
+	switch (btn)
+	{
+		case BTN_RESET:
+			machine->Reset();
+			Close();                         // close so the boot is visible
+			break;
+		case BTN_MACHINE:
+			OpenMachinePicker();
+			break;
+		case BTN_KEYBOARD:
+			OpenKeyboardPicker();
+			break;
+		case BTN_ABOUT:
+			mode = ABOUT;
+			break;
+		case BTN_UNMOUNT1:
+		case BTN_UNMOUNT2:
+		{
+			int drv = btn - BTN_UNMOUNT1;
+			if (machine->device.HasFloppy(drv))
+			{
+				machine->Unmount(drv);
+				char msg[32];
+				snprintf(msg, sizeof(msg), "UNMOUNTED DRIVE %d", drv + 1);
+				SetStatus(msg);
+			}
+			else
+				SetStatus(drv == 0 ? "DRIVE 1 EMPTY" : "DRIVE 2 EMPTY");
+			break;
+		}
+	}
 }
 
 void Supervisor::Select()
 {
 	int index = cursor;
-
-	if (index == 0)                          // [ RESET MACHINE ]
-	{
-		machine->Reset();
-		Close();                             // close so the boot is visible
-		return;
-	}
-	if (index == 1 || index == 2)            // [ UNMOUNT DRIVE n ]
-	{
-		int drv = index - 1;
-		if (machine->device.HasFloppy(drv))
-		{
-			machine->Unmount(drv);
-			char msg[32];
-			snprintf(msg, sizeof(msg), "UNMOUNTED DRIVE %d", drv + 1);
-			SetStatus(msg);
-		}
-		else
-			SetStatus(drv == 0 ? "DRIVE 1 EMPTY" : "DRIVE 2 EMPTY");
-		return;
-	}
-	if (index == 3)                          // [ MACHINE: ... ]
-	{
-		OpenMachinePicker();
-		return;
-	}
-	if (index == 4)                          // [ KEYBOARD: ... ]
-	{
-		OpenKeyboardPicker();
-		return;
-	}
-	if (index == 5)                          // [ ABOUT ]
-	{
-		mode = ABOUT;
-		return;
-	}
-	index -= SUP_ACTION_COUNT;
 
 	if (!AtRoot())
 	{

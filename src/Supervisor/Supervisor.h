@@ -26,9 +26,19 @@ class VGA;
 #define SUP_MAX_ENTRIES 128
 #define SUP_NAME_LEN    64
 #define SUP_PATH_LEN    256
-#define SUP_LIST_TOP    4    // first text row of the list window
-#define SUP_LIST_ROWS   16   // visible list rows
-#define SUP_ACTION_COUNT 6   // pinned [ ... ] items ahead of the SD entries
+#define SUP_LIST_TOP    4    // first text row of the picker lists
+#define SUP_LIST_ROWS   16   // visible picker rows
+#define SUP_FILES_TOP   8    // first text row of the SD browser, below the buttons
+#define SUP_FILES_ROWS  12   // visible SD browser rows
+
+// Buttons above the SD browser: two rows, laid out in Supervisor.cpp
+enum SupButton
+{
+	BTN_RESET, BTN_MACHINE, BTN_KEYBOARD, BTN_ABOUT,   // top row
+	BTN_UNMOUNT1, BTN_UNMOUNT2,                        // bottom row
+	BTN_COUNT,
+	BTN_NONE = -1                                      // focus is in the SD list
+};
 
 // one SD directory entry shown in the browser
 struct SupEntry
@@ -67,6 +77,9 @@ private:
 	int entryCount;
 	bool sdError;
 
+	int focusBtn;                // focused SupButton, BTN_NONE when the list has focus
+	int lastTop;                 // button to return to when moving up to the top row
+	int lastBottom;              // same for the unmount row
 	int cursor;                  // index into the virtual list
 	int scroll;                  // first visible virtual index
 	char status[SCREENTEXT_X + 1];
@@ -78,9 +91,7 @@ private:
 
 	int keyboardCursor;          // PICK_KEYBOARD selection
 
-	// virtual list layout: [0]=reset [1]=unmount d1 [2]=unmount d2
-	// [3]=machine [4]=keyboard [5]=about, then ".." when not at root,
-	// then entries[]
+	// virtual list layout: ".." when not at root, then entries[]
 	bool AtRoot() { return curPath[1] == '\0'; }
 	int VirtualCount();
 	void VirtualLabel(int index, char* out, int outlen);
@@ -88,9 +99,13 @@ private:
 	void ScanDir();
 	void EnterDir(const char* name);
 	void UpDir();
-	void Select();               // Enter pressed in BROWSE mode
+	void Select();               // Enter pressed on an SD entry
+	void Press(int btn);         // Enter pressed on a button
 	void MountTo(int drive);
 	void MoveCursor(int delta);
+	void MoveFocus(int dx, int dy);   // arrow keys in BROWSE mode
+	void FocusButton(int btn);
+	void ButtonHint(int btn);
 	void OpenMachinePicker();
 	void ChooseMachine(int id);
 	void OpenKeyboardPicker();
@@ -103,14 +118,18 @@ private:
 	void DrawText(int col, int row, const char* text, int fg, int bg);
 	void DrawRow(int row, const char* text, int fg, int bg);
 	void DrawBar(int row, const char* text, int fg, int bg);
+	void DrawTextXY(int x, int y, const char* text, int fg, int bg);
 	void DrawRule(int row);          // six-band Apple stripe rule
-	void DrawChrome();               // page field, margins, stripe motif
+	void DrawChrome(int listTop = SUP_LIST_TOP, int listRows = SUP_LIST_ROWS);
+	void DrawDiskSlot(int col, int drive);
+	void DrawButton(int btn);
 	void RenderBrowse();
 	void RenderAbout();
 	void RenderMachines();
 	void RenderKeyboards();
 	void RenderRestarting();
 	int  RowColor(int index, bool selected, int* bg);
+	bool ListFocused() { return focusBtn == BTN_NONE; }
 };
 
 #endif

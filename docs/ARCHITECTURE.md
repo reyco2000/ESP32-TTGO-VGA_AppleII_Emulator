@@ -141,10 +141,11 @@ loads the 16 entries.
 **`Supervisor`** (`src/Supervisor/`) is the F1 menu. It pauses emulation (the
 frame loop skips `machine->Run()` while it is active), browses the SD card,
 mounts/unmounts disk images via `Apple2Machine::Mount`/`Unmount`, switches
-machine and shows `[ ABOUT ]`. It paints directly into the live framebuffer in
+machine and shows the ABOUT page. Its actions are a row of buttons above the
+file list, reached with all four arrow keys. It paints directly into the live framebuffer in
 its own palette and calls `Apple2Device::InvalidateRenderCache()` on close so the
 emulator repaints fully. Its font has no box-drawing glyphs and no lowercase
-(glyphs `0x20`-`0x5F`), so every bar, rule and panel is a pixel fill via
+(glyphs `0x20`-`0x5F`), so every bar, rule, button and panel is a pixel fill via
 `VGA::fillRect`.
 
 ## Constraints
