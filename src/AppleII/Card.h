@@ -32,6 +32,11 @@ public:
 	// Memory::Remap() whenever what this returns changes.
 	virtual BYTE* SlotRom() { return NULL; }
 
+	// 2K mapped at $C800-$CFFF while this slot holds the expansion ROM, or
+	// NULL for a card that has none. A card with one is selected by any
+	// access to its own $Cn00 page and dropped by an access to $CFFF.
+	virtual BYTE* ExpansionRom() { return NULL; }
+
 	// Controller state back to power-up; inserted media stay.
 	virtual void Reset() {}
 };

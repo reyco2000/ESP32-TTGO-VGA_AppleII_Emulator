@@ -2,6 +2,11 @@
 
 An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images are loaded from an SD card — no host computer involved.
 
+## What's new in 0.8.0
+
+- **Super Serial Card.** A 6551-based SSC can be put in slot 1 or slot 2 from the F1 menu's new **SERIAL** button. Its serial line is the board's USB port, so `PR#2` / `IN#2` talk to a terminal on the computer at the other end of the programming cable, and `PR#1` prints a listing to it. With **ALSO CAPTURE TO SD CARD** on, everything the Apple prints is written to `/printer/print-NNN.txt` as well. The card needs its firmware ROM on the SD card — see [Super Serial Card](#super-serial-card).
+- While the card is installed the firmware's own serial log stops, so nothing of ours lands in the middle of the Apple's output.
+
 ## What's new in 0.7.0
 
 - **Redesigned F1 supervisor menu.** The actions are now real buttons above the SD card browser: **RESET**, **MACHINE**, **KEYBOARD** and **ABOUT** on one row, **UNMOUNT D1** and **UNMOUNT D2** below them. They're drawn as raised buttons, and the focused one turns cyan. An unmount button for an empty drive is dimmed.
@@ -44,9 +49,10 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 - 6502 and 65C02 CPU cores checked against Klaus Dormann's functional test suites, run on the build machine (`tests/host/run-cpu-tests.sh`)
 - Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not yet verified — see TODO)
 - **Two emulated Disk II drives** that take 140K sector images (`.dsk` / `.do` in DOS 3.3 order, `.po` in ProDOS order) and nibblized `.nib` images
-- **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount disk images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with **MACHINE**, pick the keyboard layout with **KEYBOARD**, or open **ABOUT** for the firmware version and credits. The arrow keys move between the buttons and the file list. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
+- **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount disk images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with **MACHINE**, pick the keyboard layout with **KEYBOARD**, put a Super Serial Card in a slot with **SERIAL**, or open **ABOUT** for the firmware version and credits. The arrow keys move between the buttons and the file list. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
 - **Runs standalone or under [ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader)**: flash it on its own over USB, or put it on the SD card as one entry in the bootloader's multi-emulator menu. Every release ships both builds (see [ESP32_Bootloader](#esp32_bootloader-sd-card-menu))
+- **Super Serial Card** in slot 1 or 2, wired to the board's USB serial port: a terminal, a printer, or both at once with a capture file on the SD card (see [Super Serial Card](#super-serial-card))
 - **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
 - Boots to BASIC with no disk mounted; the Disk II boot PROM is only visible to the machine while a disk is mounted, so `PR#6` and the boot-time slot scan always behave
 
@@ -188,6 +194,7 @@ The Apple ][+ system ROM and the Disk II boot PROM are built into the firmware, 
 | `apple2e_enhanced_video.rom` | 4,096 | enhanced //e character ROM 342-0265-A (lowercase, MouseText) | Apple //e — required |
 | `apple2plus.rom` | 12,288 | Apple ][+ Applesoft and Autostart ROM | optional, replaces the built-in one |
 | `diskii.rom` | 256 | Disk II boot PROM 341-0027 | optional, replaces the built-in one |
+| `ssc.rom` | 2,048 | Super Serial Card firmware 341-0065 | Super Serial Card — required |
 
 The //e system ROM is often found as two 8K halves; join them in this order:
 
@@ -202,6 +209,7 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
 - Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (then `1`/`2` picks the drive), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
 - **MACHINE** switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
+- **SERIAL** installs or removes the Super Serial Card, and turns the SD card capture file on and off (see [Super Serial Card](#super-serial-card)).
 - **KEYBOARD** picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
 - Use the menu's **RESET** button (or `PR#6` from BASIC) to boot a mounted disk. **UNMOUNT D1** and **UNMOUNT D2** empty a drive.
 - On the //e, `PR#3` turns on 80-column text; **Esc** then **4** or **8** switches between 40 and 80 columns, and **Esc** then **Ctrl+Q** turns the 80-column firmware off.
@@ -215,6 +223,35 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 | **Ctrl+Left Alt+F12** | //e: Open-Apple-Ctrl-Reset, a cold boot |
 | **Ctrl+Left Alt+Right Alt+F12** | //e: the built-in self-test, which ends with "System OK" |
 | **Left Alt / Right Alt** | Open Apple / Solid Apple (pushbuttons 0 and 1) |
+
+### Super Serial Card
+
+The **SERIAL** button in the F1 menu puts a Super Serial Card in **slot 1** or **slot 2**, or takes it out again. The choice is saved and comes back at the next boot; installing or removing the card takes effect at once, without a restart, and the Apple sees it at its next `PR#` or `IN#`.
+
+The card is Apple's, and so is its firmware: put a 2,048-byte dump of the 341-0065 ROM in `/roms/ssc.rom`. Without it the slots in the picker are greyed out.
+
+Its serial line is the ESP32's USB port — the same cable the board is flashed and logged over, since every other pin on the TTGO VGA32 is taken by VGA, SD, PS/2 and audio. So **while the card is installed, the firmware's log goes quiet**: otherwise `Heap : ...` would appear in the middle of a listing. Take the card out to get the log back.
+
+On the computer at the other end, open the port at **115200 baud, 8N1, no flow control**, and keep DTR and RTS low — the board's USB-serial chip resets the ESP32 when a terminal raises them:
+
+```bash
+picocom -b 115200 --lower-dtr --lower-rts /dev/ttyACM0
+# or:  minicom -D /dev/ttyACM0 -b 115200   (turn hardware flow control off)
+```
+
+Then, from Applesoft with the card in slot 2:
+
+```
+PR#2          : send what the Apple prints to the terminal
+IN#2          : take what is typed in the terminal as keyboard input
+PR#0 : IN#0   : back to the screen and the PS/2 keyboard
+```
+
+With the card in slot 1 it behaves as the printer it was usually wired to: `PR#1`, `LIST`, `PR#0` sends a listing out, and a carriage return also feeds a line.
+
+**ALSO CAPTURE TO SD CARD** in the picker additionally writes everything the Apple sends to `/printer/print-NNN.txt`, a new file each time the board powers up. The text is buffered and written out when a second passes with nothing more printed, so give it a moment before pulling the card out of the board.
+
+What the emulated card gives the firmware is a 6551 that is always ready to send, has DCD and DSR asserted, and never raises an interrupt. That is enough for `PR#`/`IN#` and for printing; software that drives the 6551's interrupts itself will not work, because the CPU core has no IRQ line yet. The baud rate the Apple programs is remembered and read back but changes nothing: the USB port stays at 115200.
 
 ### Joystick
 

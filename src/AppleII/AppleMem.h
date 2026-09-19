@@ -42,6 +42,7 @@ class Memory
 		bool intCxRom;              // INTCXROM: all of $C100-$CFFF from internal ROM
 		bool slotC3Rom;             // SLOTC3ROM: $C300 from slot 3 instead of internal ROM
 		bool intC8Rom;              // internal $C800-$CFFF: set by touching $C3xx
+		int  expSlot;               // slot whose card holds $C800-$CFFF, 0 = none
 		bool page2;                 // copies of the video switches 80STORE depends on
 		bool hires;
 

@@ -133,6 +133,7 @@ void Memory::ResetSwitches()
 
 	store80 = ramRd = ramWrt = altZp = false;
 	intCxRom = slotC3Rom = intC8Rom = false;
+	expSlot = 0;
 
 	Remap();
 }
@@ -176,15 +177,32 @@ void Memory::Remap()
 				page = rom + (slot << 8);
 		}
 		else if (device && device->slots[slot])
-			page = device->slots[slot]->SlotRom();
+		{
+			// a card with an expansion ROM keeps its $Cn00 page on the slow
+			// path until an access there has selected the slot, which is how
+			// the access gets seen at all
+			Card* card = device->slots[slot];
+			if (!card->ExpansionRom() || expSlot == slot)
+				page = card->SlotRom();
+		}
 		readPage[0xC0 + slot] = page;
 	}
 
-	// IIe internal $C800-$CEFF. $CFxx always stays on the slow path: an
-	// access to $CFFF switches INTC8ROM off.
+	// $C800-$CEFF: the IIe's internal ROM, which wins, or the expansion ROM
+	// of the selected slot. $CFxx always stays on the slow path: an access
+	// to $CFFF releases both.
 	if (iie && (intCxRom || intC8Rom))
+	{
 		for (int p = 0xC8; p < 0xCF; p++)
 			readPage[p] = rom + ((p - 0xC0) << 8);
+	}
+	else if (expSlot && device && device->slots[expSlot])
+	{
+		BYTE* exp = device->slots[expSlot]->ExpansionRom();
+		if (exp)
+			for (int p = 0xC8; p < 0xCF; p++)
+				readPage[p] = exp + ((p - 0xC8) << 8);
+	}
 
 	RemapLanguageCard();
 }
@@ -206,24 +224,39 @@ void Memory::RemapLanguageCard()
 	}
 }
 
-// IIe $C100-$CFFF on the slow path: pages whose access changes which ROM is
-// visible ($C3xx sets INTC8ROM, $CFFF clears it), and pages with nothing
-// mapped. Writes only have the side effects.
+// $C100-$CFFF on the slow path: pages whose access changes which ROM is
+// visible (a card's $Cn00 selects its expansion ROM, the IIe's $C3xx sets
+// INTC8ROM, $CFFF releases both), and pages with nothing mapped. Writes
+// only have the side effects.
 BYTE Memory::CxAccess(int address, BYTE value, bool write)
 {
 	int page = address >> 8;
 	if (address == 0xCFFF)
 	{
-		if (intC8Rom)
+		if (intC8Rom || expSlot)
 		{
 			intC8Rom = false;
+			expSlot = 0;
 			Remap();
 		}
+		// on the ][+ this is also where the Disk II motor is stopped
+		if (device)
+			device->SoftSwitch(this, address, value, write);
 	}
-	else if (page == 0xC3 && !slotC3Rom && !intC8Rom)
+	else if (iie && page == 0xC3 && !slotC3Rom && !intC8Rom)
 	{
 		intC8Rom = true;
 		Remap();
+	}
+	else if (page >= 0xC1 && page <= 0xC7 && !(iie && intCxRom))
+	{
+		int slot = page & 0x07;
+		Card* card = (device && expSlot != slot) ? device->slots[slot] : NULL;
+		if (card && card->ExpansionRom())
+		{
+			expSlot = slot;
+			Remap();
+		}
 	}
 
 	if (write)
@@ -232,8 +265,18 @@ BYTE Memory::CxAccess(int address, BYTE value, bool write)
 	BYTE* p = readPage[page];
 	if (p)
 		return p[address & 0xFF];
-	bool internal = intCxRom || (page == 0xC3 && !slotC3Rom) || (page >= 0xC8 && intC8Rom);
-	return internal ? rom[address - 0xC000] : 0;
+
+	bool internal = iie && (intCxRom || (page == 0xC3 && !slotC3Rom) || (page >= 0xC8 && intC8Rom));
+	if (internal)
+		return rom[address - 0xC000];
+	// $CFxx of the selected card: the only expansion ROM page never mapped
+	if (page == 0xCF && expSlot && device && device->slots[expSlot])
+	{
+		BYTE* exp = device->slots[expSlot]->ExpansionRom();
+		if (exp)
+			return exp[address - 0xC800];
+	}
+	return 0;
 }
 
 // The CPU's only way into memory. A NULL page means $C000-$CFFF: soft
@@ -248,7 +291,7 @@ BYTE IRAM_ATTR Memory::ReadByte(int address)
 		return page[address & 0xFF];
 	if ((address & 0xF000) == 0xC000)
 	{
-		if (iie && address >= 0xC100)
+		if (address >= 0xC100)
 			return CxAccess(address, 0, false);
 		return device->SoftSwitch(this, address, 0, false);
 	}
@@ -262,7 +305,7 @@ void IRAM_ATTR Memory::WriteByte(int address, BYTE value)
 		page[address & 0xFF] = value;
 	else if ((address & 0xF000) == 0xC000)
 	{
-		if (iie && address >= 0xC100)
+		if (address >= 0xC100)
 			CxAccess(address, value, true);
 		else
 			device->SoftSwitch(this, address, value, true);

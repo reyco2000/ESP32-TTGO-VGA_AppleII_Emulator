@@ -62,9 +62,34 @@ Apple2Device::Apple2Device()
 	fpsValue = 0;
 	mouseMiddle = false;
 	iie = false;
+	sscSlot = 0;
 	for (int slot = 0; slot < 8; slot++)
 		slots[slot] = NULL;
 	Reset();
+}
+
+// Installing the card needs its firmware, which is read from the SD card on
+// the first call. A slot that already holds another card is left alone.
+bool Apple2Device::SetSerialSlot(int slot, bool capture)
+{
+	if (sscSlot)
+	{
+		slots[sscSlot] = NULL;
+		sscSlot = 0;
+	}
+	ssc.FlushCapture();
+
+	if (slot < 1 || slot > 7 || slots[slot])
+		return false;
+	if (!ssc.Install())
+		return false;
+
+	// slot 1 is the printer slot: there the card adds a linefeed to each
+	// carriage return, as a printer of the time needed
+	ssc.Configure(slot, slot == 1, capture);
+	slots[slot] = &ssc;
+	sscSlot = slot;
+	return true;
 }
 
 Apple2Device::~Apple2Device()
@@ -410,6 +435,10 @@ void Apple2Device::UpdateInput()
 {
 	UpdateKeyBoard();
 	UpdateGamepad();
+	// the serial card's own input: a byte from the USB UART into its
+	// receive latch, plus the idle flush of its capture buffer
+	if (sscSlot)
+		ssc.Poll();
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
@@ -507,7 +536,7 @@ void Apple2Device::UpdateKeyBoard()
         }
 #if KEY_TRACE
         else if (code)
-            Serial.println("[key] type-ahead full, dropped");
+            LOGLN("[key] type-ahead full, dropped");
 #endif
     }
 

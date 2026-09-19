@@ -56,12 +56,12 @@ RomStatus RomLoader::Load(const char* file, BYTE* dest, int size)
 	File f = FileSystem::Open(path);
 	if (!f || f.isDirectory())
 	{
-		Serial.printf("[rom] %s: missing\n", path);
+		LOGF("[rom] %s: missing\n", path);
 		return ROM_MISSING;
 	}
 	if ((int)f.size() != size)
 	{
-		Serial.printf("[rom] %s: %u bytes, expected %d - ignored\n", path, (unsigned)f.size(), size);
+		LOGF("[rom] %s: %u bytes, expected %d - ignored\n", path, (unsigned)f.size(), size);
 		f.close();
 		return ROM_BAD_SIZE;
 	}
@@ -70,11 +70,11 @@ RomStatus RomLoader::Load(const char* file, BYTE* dest, int size)
 	f.close();
 	if (got != size)
 	{
-		Serial.printf("[rom] %s: short read (%d of %d bytes)\n", path, got, size);
+		LOGF("[rom] %s: short read (%d of %d bytes)\n", path, got, size);
 		return ROM_BAD_SIZE;
 	}
 
-	Serial.printf("[rom] %s: %d bytes, crc32 %08x\n", path, size, (unsigned)Crc32(dest, size));
+	LOGF("[rom] %s: %d bytes, crc32 %08x\n", path, size, (unsigned)Crc32(dest, size));
 	return ROM_OK;
 }
 

@@ -18,7 +18,7 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define FW_VERSION_STR   "0.7.0"
+#define FW_VERSION_STR   "0.8.0"
 #define FW_BUILD_DATE    __DATE__
 
 #endif
