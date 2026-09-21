@@ -20,6 +20,7 @@
 #include <string>
 #include "AppleVideo.h"
 #include "DiskIICard.h"
+#include "SuperSerialCard.h"
 #include "Joystick.h"
 #include "../Tools/Log.h"
 
@@ -46,6 +47,7 @@ public:
 	// handled by SoftSwitch). Apple2Machine installs what its profile has.
 	Card* slots[8];
 	DiskIICard disk6;
+	SuperSerialCard ssc;
 
 	// Paddles 0/1 and pushbuttons 0/1, moved by the PS/2 mouse. Not in
 	// Reset(): an emulated reset leaves the stick where it is.
@@ -69,6 +71,9 @@ public:
 	bool iie;
 	// Ctrl+F12: Apple2Machine pulls the RESET line before the next run
 	bool resetRequested;
+
+	// Slot the Super Serial Card sits in, 0 when it is not installed
+	int sscSlot;
 
 
 private:
@@ -105,6 +110,12 @@ public:
 	void Reset();
 	void Dump(FILE* fp);
 	void LoadDump(FILE* fp);
+
+	// The Super Serial Card: slot 0 takes it out of the machine, 1-7 put it
+	// in that slot. False when it has no firmware ROM to run and so was not
+	// installed; the caller must Remap() afterwards.
+	bool SetSerialSlot(int slot, bool capture);
+	int  SerialSlot() const { return sscSlot; }
 
 	// The Disk II in slot 6, for Apple2Machine and the supervisor
 	bool HasFloppy(int drive) { return disk6.HasFloppy(drive); }

@@ -28,6 +28,7 @@
 #include "../Tools/Settings.h"
 #include "../Tools/KeyboardLayouts.h"
 #include "../Tools/Bootloader.h"
+#include "../AppleII/SuperSerialCard.h"
 
 extern fabgl::Keyboard *keyboard_ptr;
 
@@ -79,9 +80,11 @@ static inline int ColX(int col) { return SUP_ORIGIN_X + col * SUP_CELL_W; }
 static inline int RowY(int row) { return SUP_ORIGIN_Y + row * FONT_Y; }
 
 // Buttons sit between the two stripe rules (rows 2 and 7) in pixel space, off
-// the text grid, so each can have a 2px margin around its label. The unmount
-// row spans the columns above it: D1 under RESET+MACHINE, D2 under
-// KEYBOARD+ABOUT, which is also where UP/DOWN land.
+// the text grid, so each can have a 2px margin around its label. The five
+// top-row buttons span the same 40..598 the browser does, with 7px of padding
+// either side of a label and about 13px between buttons. The unmount row
+// spans the columns above it: D1 under the left half, D2 under the right,
+// which is also where UP/DOWN land.
 #define BTN_H     12
 #define BTN_TOP_Y 29
 #define BTN_BOT_Y 46
@@ -89,15 +92,28 @@ static inline int RowY(int row) { return SUP_ORIGIN_Y + row * FONT_Y; }
 struct ButtonRect { const char* label; int x, y, w; };
 static const ButtonRect buttonRects[BTN_COUNT] =
 {
-	{ "RESET",      40,  BTN_TOP_Y,  98 },
-	{ "MACHINE",    170, BTN_TOP_Y, 126 },
-	{ "KEYBOARD",   328, BTN_TOP_Y, 140 },
-	{ "ABOUT",      500, BTN_TOP_Y,  98 },
+	{ "RESET",      40,  BTN_TOP_Y,  84 },
+	{ "MACHINE",    137, BTN_TOP_Y, 112 },
+	{ "KEYBOARD",   263, BTN_TOP_Y, 126 },
+	{ "SERIAL",     402, BTN_TOP_Y,  98 },
+	{ "ABOUT",      514, BTN_TOP_Y,  84 },
 	{ "UNMOUNT D1", 40,  BTN_BOT_Y, 256 },
 	{ "UNMOUNT D2", 328, BTN_BOT_Y, 270 },
 };
 
 static inline bool TopRow(int btn) { return btn <= BTN_ABOUT; }
+
+// Serial card picker: the three places the card can be, then the line that
+// turns the capture file on and off.
+#define SUP_SERIAL_ROWS        4
+#define SUP_SERIAL_CAPTURE_ROW 3
+static const char* serialRowLabel[SUP_SERIAL_ROWS] =
+{
+	"NOT INSTALLED",
+	"SLOT 1  (PRINTER)",
+	"SLOT 2  (TERMINAL / MODEM)",
+	"ALSO CAPTURE TO SD CARD",
+};
 
 // file name without its directory, for the D1/D2 line and hints
 static const char* BaseName(const char* path)
@@ -121,6 +137,8 @@ Supervisor::Supervisor(Apple2Machine* m)
 	focusBtn = BTN_RESET;
 	lastTop = BTN_RESET;
 	lastBottom = BTN_UNMOUNT1;
+	serialCursor = 0;
+	serialRomMissing = false;
 	cursor = 0;
 	scroll = 0;
 	status[0] = '\0';
@@ -380,6 +398,22 @@ void Supervisor::Update()
 			continue;
 		}
 
+		if (mode == PICK_SERIAL)
+		{
+			if (vk == fabgl::VK_UP && serialCursor > 0)
+				serialCursor--;
+			else if (vk == fabgl::VK_DOWN && serialCursor < SUP_SERIAL_ROWS - 1)
+				serialCursor++;
+			else if (vk == fabgl::VK_RETURN)
+				ChooseSerial(serialCursor);
+			else if (vk == fabgl::VK_ESCAPE)
+			{
+				ButtonHint(focusBtn);
+				mode = BROWSE;
+			}
+			continue;
+		}
+
 		if (mode == RESTARTING)
 			continue;
 
@@ -442,6 +476,8 @@ void Supervisor::Render(VGA* vgaOut)
 		RenderMachines();
 	else if (mode == PICK_KEYBOARD)
 		RenderKeyboards();
+	else if (mode == PICK_SERIAL)
+		RenderSerial();
 	else if (mode == RESTARTING)
 	{
 		// the choice is already in NVS; show it long enough to read
@@ -510,22 +546,32 @@ void Supervisor::RenderAbout()
 	DrawText(13, 6, "640X200 VGA / 16 COLORS", C_WHITE, C_BG);
 	DrawText(2, 7, "KEYBOARD", C_YELLOW, C_BG);
 	DrawText(13, 7, GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name, C_WHITE, C_BG);
-	DrawText(2, 8, "VERSION", C_YELLOW, C_BG);
+	DrawText(2, 8, "SERIAL", C_YELLOW, C_BG);
+	{
+		char line[32];
+		int slot = machine->device.SerialSlot();
+		if (slot)
+			snprintf(line, sizeof(line), "SUPER SERIAL CARD, SLOT %d", slot);
+		else
+			snprintf(line, sizeof(line), "NONE");
+		DrawText(13, 8, line, C_WHITE, C_BG);
+	}
+	DrawText(2, 9, "VERSION", C_YELLOW, C_BG);
 #if BUILD_TARGET == BUILD_TARGET_BOOTLOADER
-	DrawText(13, 8, FW_VERSION_STR " (SD BOOTLOADER)", C_WHITE, C_BG);
+	DrawText(13, 9, FW_VERSION_STR " (SD BOOTLOADER)", C_WHITE, C_BG);
 #else
-	DrawText(13, 8, FW_VERSION_STR, C_WHITE, C_BG);
+	DrawText(13, 9, FW_VERSION_STR, C_WHITE, C_BG);
 #endif
-	DrawText(2, 9, "BUILT", C_YELLOW, C_BG);
-	DrawText(13, 9, FW_BUILD_DATE, C_WHITE, C_BG);
+	DrawText(2, 10, "BUILT", C_YELLOW, C_BG);
+	DrawText(13, 10, FW_BUILD_DATE, C_WHITE, C_BG);
 
-	DrawText(2, 11, "CREDITS", C_YELLOW, C_BG);
-	DrawText(2, 12, "REINALDO TORRES / COCO BYTE CLUB", C_WHITE, C_BG);
-	DrawText(2, 13, "BASED ON CODESAFE", C_GREY, C_BG);
-	DrawText(4, 14, "ESP32-VGA_APPLEII_EMULATOR", C_GREY, C_BG);
-	DrawText(2, 15, "FABGL BY FABRIZIO DI VITTORIO", C_GREY, C_BG);
-	DrawText(2, 16, "CO-DEVELOPED WITH CLAUDE CODE", C_GREY, C_BG);
-	DrawText(2, 17, "MIT LICENSE", C_GREY, C_BG);
+	DrawText(2, 12, "CREDITS", C_YELLOW, C_BG);
+	DrawText(2, 13, "REINALDO TORRES / COCO BYTE CLUB", C_WHITE, C_BG);
+	DrawText(2, 14, "BASED ON CODESAFE", C_GREY, C_BG);
+	DrawText(4, 15, "ESP32-VGA_APPLEII_EMULATOR", C_GREY, C_BG);
+	DrawText(2, 16, "FABGL BY FABRIZIO DI VITTORIO", C_GREY, C_BG);
+	DrawText(2, 17, "CO-DEVELOPED WITH CLAUDE CODE", C_GREY, C_BG);
+	DrawText(2, 18, "MIT LICENSE", C_GREY, C_BG);
 
 	DrawText(2, 19, "GITHUB.COM/REYCO2000/", C_DIMCYAN, C_BG);
 	DrawText(4, 20, "ESP32-TTGO-VGA_APPLEII_EMULATOR", C_DIMCYAN, C_BG);
@@ -721,6 +767,16 @@ void Supervisor::ButtonHint(int btn)
 			         GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name);
 			SetStatus(msg);
 			break;
+		case BTN_SERIAL:
+		{
+			int slot = machine->device.SerialSlot();
+			if (slot)
+				snprintf(msg, sizeof(msg), "SUPER SERIAL CARD IN SLOT %d", slot);
+			else
+				snprintf(msg, sizeof(msg), "SUPER SERIAL CARD: NOT INSTALLED");
+			SetStatus(msg);
+			break;
+		}
 		case BTN_ABOUT:
 			SetStatus("VERSION AND CREDITS");
 			break;
@@ -752,6 +808,9 @@ void Supervisor::Press(int btn)
 			break;
 		case BTN_KEYBOARD:
 			OpenKeyboardPicker();
+			break;
+		case BTN_SERIAL:
+			OpenSerialPicker();
 			break;
 		case BTN_ABOUT:
 			mode = ABOUT;
@@ -934,6 +993,102 @@ void Supervisor::RenderKeyboards()
 	vga->fillRect(0, RowY(20) + 3, VGA_WIDTH, 1, C_DIM);
 	DrawRow(21, status, C_AMBER, C_BG);
 	DrawRow(22, "ACCENTS AND N-TILDE HAVE NO APPLE KEY", C_DIMCYAN, C_BG);
+	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:BACK", C_GREY, C_BARBG);
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Super Serial Card picker. The card's line is the ESP32's USB serial port,
+// so what it sends reaches whatever terminal is on the other end of the
+// programming cable; with capture on it is also written to the SD card.
+// Installing or removing the card takes effect at once, like mounting a
+// disk, and the Apple only sees the change at its next PR#/IN#.
+
+void Supervisor::OpenSerialPicker()
+{
+	serialRomMissing = (RomLoader::Check(SSC_ROM, SSC_ROM_SIZE) != ROM_OK);
+	int slot = machine->device.SerialSlot();
+	serialCursor = (slot >= 1 && slot <= 2) ? slot : 0;
+	SetStatus("");
+	mode = PICK_SERIAL;
+}
+
+void Supervisor::ChooseSerial(int row)
+{
+	char msg[SCREENTEXT_X + 1];
+	bool capture = Settings::LoadPrintCapture(false);
+
+	if (row == SUP_SERIAL_CAPTURE_ROW)
+	{
+		capture = !capture;
+		if (!Settings::SavePrintCapture(capture))
+		{
+			SetStatus("CANNOT SAVE SETTINGS (NVS)");
+			return;
+		}
+		machine->SetSerialSlot(machine->device.SerialSlot(), capture);
+		SetStatus(capture ? "CAPTURING TO /PRINTER ON THE SD CARD"
+		                  : "CAPTURE OFF, USB ONLY");
+		return;
+	}
+
+	int slot = row;                          // rows 0-2 are slots 0-2
+	if (slot && serialRomMissing)
+	{
+		snprintf(msg, sizeof(msg), "MISSING %s", SSC_ROM);
+		SetStatus(msg);
+		return;
+	}
+	if (!machine->SetSerialSlot(slot, capture))
+	{
+		SetStatus("THAT SLOT IS TAKEN");
+		return;
+	}
+
+	if (!Settings::SaveSerial((uint8_t)slot))
+		SetStatus("CANNOT SAVE SETTINGS (NVS)");
+	else if (slot)
+	{
+		snprintf(msg, sizeof(msg), "SERIAL CARD IN SLOT %d - PR#%d / IN#%d", slot, slot, slot);
+		SetStatus(msg);
+	}
+	else
+		SetStatus("SERIAL CARD REMOVED");
+	mode = BROWSE;
+}
+
+void Supervisor::RenderSerial()
+{
+	DrawChrome();
+	DrawBar(0, "             SERIAL CARD", C_WHITE, C_BARBG);
+	DrawRow(1, " SUPER SERIAL CARD OVER THE USB PORT", C_GREY, C_BG);
+	DrawRule(3);
+
+	int slot = machine->device.SerialSlot();
+	bool capture = Settings::LoadPrintCapture(false);
+
+	char line[64];
+	for (int i = 0; i < SUP_SERIAL_ROWS; i++)
+	{
+		int row = SUP_LIST_TOP + i + (i == SUP_SERIAL_CAPTURE_ROW ? 1 : 0);
+		bool selected = (i == serialCursor);
+		if (i == SUP_SERIAL_CAPTURE_ROW)
+			snprintf(line, sizeof(line), " %s  [%s]", serialRowLabel[i], capture ? "ON" : "OFF");
+		else
+			snprintf(line, sizeof(line), " %s%s", serialRowLabel[i], i == slot ? "  (IN USE)" : "");
+		int fg = selected ? C_BLACK : ((i >= 1 && i <= 2 && serialRomMissing) ? C_GREY : C_WHITE);
+		DrawRow(row, line, fg, selected ? C_CYAN : C_BG);
+	}
+
+	if (serialRomMissing)
+		DrawRow(SUP_LIST_TOP + 6, "   NEEDS " SSC_ROM, C_RED, C_BG);
+
+	DrawRow(SUP_LIST_TOP + 8,  " 115200 BAUD 8N1, NO HANDSHAKE.", C_DIMCYAN, C_BG);
+	DrawRow(SUP_LIST_TOP + 9,  " THE FIRMWARE LOG STOPS WHILE THE", C_DIMCYAN, C_BG);
+	DrawRow(SUP_LIST_TOP + 10, " CARD IS INSTALLED.", C_DIMCYAN, C_BG);
+
+	vga->fillRect(0, RowY(20) + 3, VGA_WIDTH, 1, C_DIM);
+	DrawRow(21, status, C_AMBER, C_BG);
+	DrawRow(22, "ROM FILES GO IN /ROMS ON THE SD CARD", C_DIMCYAN, C_BG);
 	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:BACK", C_GREY, C_BARBG);
 }
 

@@ -21,6 +21,7 @@
 #include "Apple2Machine.h"
 #include "RomLoader.h"
 #include "../Tools/Log.h"
+#include "../Tools/Settings.h"
 #include "../VGA/VGA.h"
 
 Apple2Machine::Apple2Machine(const MachineProfile& p)
@@ -52,6 +53,9 @@ void Apple2Machine::InitMachine()
 	mem.WriteByte(0xD0, 0xAA);   // won't work if this memory location equals zero
 
 	mem.device = &device;
+	// after mem.device: installing the card remaps the page tables, which
+	// can only see the cards through it
+	InstallSerialCard();
 
 	Booting();
 }
@@ -85,6 +89,18 @@ void Apple2Machine::LoadRoms()
 			device.video.LoadCharRom(buf);
 		free(buf);
 	}
+}
+
+// The Super Serial Card as the user last left it. Nothing to do when it is
+// switched off; when it is on but has no firmware on the card, the
+// supervisor shows the ROM as missing, so only the log says so here.
+void Apple2Machine::InstallSerialCard()
+{
+	int slot = Settings::LoadSerial(0);
+	if (!slot)
+		return;
+	if (!SetSerialSlot(slot, Settings::LoadPrintCapture(false)))
+		LOGF("[ssc] slot %d: no %s/%s, card not installed\n", slot, ROM_DIR, SSC_ROM);
 }
 
 bool Apple2Machine::Booting()
@@ -133,6 +149,32 @@ bool Apple2Machine::Mount(const char* path, int drive)
 	// PR#6 needs it present
 	mem.Remap();
 	return true;
+}
+
+// Installing or taking out the serial card: the page tables have to be
+// rebuilt, and the $C800 selection dropped in case the card that held it is
+// the one that just left. False when the card was asked for and could not
+// be installed.
+//
+// The card sends its data out of the USB UART the firmware logs to, so the
+// log stops for as long as the card is in - here rather than in the caller,
+// so that it holds however the card was installed: at boot, or from the
+// supervisor while the machine runs.
+bool Apple2Machine::SetSerialSlot(int slot, bool capture)
+{
+	Log::Muted() = false;
+	bool ok = (slot == 0) ? (device.SetSerialSlot(0, capture), true)
+	                      : device.SetSerialSlot(slot, capture);
+	mem.expSlot = 0;
+	mem.Remap();
+
+	if (device.SerialSlot())
+	{
+		LOGF("[ssc] slot %d active, the log stops here so that it does not mix"
+		     " into the card's output\n", device.SerialSlot());
+		Log::Mute();
+	}
+	return ok;
 }
 
 void Apple2Machine::Unmount(int drive)

@@ -34,7 +34,7 @@ class VGA;
 // Buttons above the SD browser: two rows, laid out in Supervisor.cpp
 enum SupButton
 {
-	BTN_RESET, BTN_MACHINE, BTN_KEYBOARD, BTN_ABOUT,   // top row
+	BTN_RESET, BTN_MACHINE, BTN_KEYBOARD, BTN_SERIAL, BTN_ABOUT,   // top row
 	BTN_UNMOUNT1, BTN_UNMOUNT2,                        // bottom row
 	BTN_COUNT,
 	BTN_NONE = -1                                      // focus is in the SD list
@@ -61,7 +61,7 @@ public:
 	void Render(VGA* vga);
 
 private:
-	enum Mode { BROWSE, PICK_DRIVE, ABOUT, PICK_MACHINE, PICK_KEYBOARD, RESTARTING };
+	enum Mode { BROWSE, PICK_DRIVE, ABOUT, PICK_MACHINE, PICK_KEYBOARD, PICK_SERIAL, RESTARTING };
 
 	Apple2Machine* machine;
 	AppleFont font;
@@ -91,6 +91,9 @@ private:
 
 	int keyboardCursor;          // PICK_KEYBOARD selection
 
+	int serialCursor;            // PICK_SERIAL selection
+	bool serialRomMissing;       // no /roms/ssc.rom: the slots cannot be picked
+
 	// virtual list layout: ".." when not at root, then entries[]
 	bool AtRoot() { return curPath[1] == '\0'; }
 	int VirtualCount();
@@ -110,6 +113,8 @@ private:
 	void ChooseMachine(int id);
 	void OpenKeyboardPicker();
 	void ChooseKeyboard(int id);
+	void OpenSerialPicker();
+	void ChooseSerial(int row);
 
 	void SetStatus(const char* msg);
 
@@ -127,6 +132,7 @@ private:
 	void RenderAbout();
 	void RenderMachines();
 	void RenderKeyboards();
+	void RenderSerial();
 	void RenderRestarting();
 	int  RowColor(int index, bool selected, int* bg);
 	bool ListFocused() { return focusBtn == BTN_NONE; }

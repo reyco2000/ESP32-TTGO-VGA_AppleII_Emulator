@@ -24,7 +24,7 @@ ESP32-VGA_AppleII_Emulator.ino   setup: SD, VGA, PS/2, picks the machine, starts
         ├── CPU                    6502 / 65C02 interpreter
         ├── Memory                 page-table address map: Language Card, IIe MMU, $Cxxx ROM
         └── Apple2Device           soft switches, keyboard, speaker
-              ├── Card* slots[8]   slot 6: DiskIICard
+              ├── Card* slots[8]   slot 6: DiskIICard, slot 1 or 2: SuperSerialCard
               ├── Joystick         paddles 0/1 and buttons from the PS/2 mouse
               └── AppleVideo       text / lores / hires / double hires -> VGA
   ├── MachineProfile               what distinguishes the models
@@ -83,15 +83,18 @@ through the `readPage`/`writePage` tables; a NULL entry sends the access down th
 slow path, to the soft switches and peripheral ROM logic in `$C000`-`$CFFF`.
 `Remap()` rebuilds the tables from the Language Card flags and, on the //e, the
 MMU switches (80STORE, RAMRD, RAMWRT, ALTZP, INTCXROM, SLOTC3ROM, INTC8ROM). The
-pages whose access changes which ROM is visible (`$C3xx` sets INTC8ROM, `$CFFF`
-clears it) stay on the slow path so the access is seen. Writes to ROM land in a
+pages whose access changes which ROM is visible stay on the slow path so the
+access is seen, in `CxAccess()`: a card's own `$Cn00` page selects that slot's
+`$C800`-`$CFFF` expansion ROM (`expSlot`), the //e's `$C3xx` sets INTC8ROM, and
+`$CFFF` releases both. The //e's internal ROM wins over a card's expansion ROM
+while INTCXROM or INTC8ROM is on, as it does on real hardware. Writes to ROM land in a
 sink page, so the write fast path needs no ROM check.
 
 **`Apple2Device`** (`src/AppleII/Apple2Device.*`) is everything that is not CPU
 or raw memory: the soft switches (the //e's `$C000`-`$C01F` block and its status
 bits in `IIeSwitch()`), the keyboard, the speaker and the slot cards. `$C090`-
 `$C0FF` goes to `slots[n]->Io()`, and `Memory` maps each card's `SlotRom()` at
-`$Cn00`. `DiskIICard` is slot 6: two drives of nibblized images in PSRAM, 35
+`$Cn00` and, for a card that has one, its `ExpansionRom()` at `$C800`-`$CFFF`. `DiskIICard` is slot 6: two drives of nibblized images in PSRAM, 35
 tracks of `0x1A00` nibbles each, read from SD via `Tools/FileSystem.h`. A `.nib`
 is loaded as is. A 140K `.dsk`/`.do`/`.po` is read into the tail of the same
 buffer and nibblized in place by `DskImage` (`src/AppleII/DskImage.*`, tested on
@@ -102,6 +105,21 @@ Each track's output ends before the next track's input begins, so it needs one
 nibble buffer; nothing goes back to the card. The card hides its boot PROM while
 no disk is inserted, so the machine boots to BASIC instead of hanging on an
 empty drive.
+
+**`SuperSerialCard`** (`src/AppleII/SuperSerialCard.*`) is the second card, in
+slot 1 or slot 2 as `Settings` remembers it, installed by
+`Apple2Machine::SetSerialSlot()` at boot or from the supervisor while the
+machine runs. It answers the registers the card's firmware polls - the two DIP
+switch banks, and the 6551's data, status, command and control - and its 2K
+firmware (`/roms/ssc.rom`, kept in PSRAM) shows at `$Cn00` and `$C800`-`$CFFF`.
+There is no IRQ line, so only polled use works: `PR#n` / `IN#n` and printing.
+The serial line itself is the ESP32's USB UART, since VGA, SD, PS/2 and audio
+take every other pin, so installing the card silences the firmware's own log
+(`Log::Mute()`, `Tools/Log.h`) - otherwise both would write into the same
+terminal. Output can also be captured to `/printer/print-NNN.txt`, buffered
+512 bytes at a time and flushed after a second of silence, so a listing is not
+one SD write per character. Register behaviour is host-tested by
+`tests/host/run-ssc-tests.sh`.
 
 The keyboard drains FabGL's event queue every frame and uses each event's own
 ASCII value — the character made with the modifiers as they were when the key

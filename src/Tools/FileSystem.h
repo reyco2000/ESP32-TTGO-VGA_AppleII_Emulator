@@ -45,7 +45,7 @@ public :
             delay(5);
             file = SD.open(path);
             if (file)
-                Serial.printf("[sd] %s opened on the second try\n", path);
+                LOGF("[sd] %s opened on the second try\n", path);
         }
         return file;
     }
@@ -57,14 +57,14 @@ public :
         File file = Open(path);
         if(!file)
         {
-            Serial.printf("- failed to open file for reading: %s\n", path);
+            LOGF("- failed to open file for reading: %s\n", path);
             return -1;
         }
 
         if (fileSize)
             *fileSize = file.size();
         int readlen = file.read(buffer, len);
-        Serial.printf("- read from file : %d\n", readlen);
+        LOGF("- read from file : %d\n", readlen);
         file.close();
 
         return readlen;

@@ -129,7 +129,7 @@ bool DiskIICard::InsertFloppy(const char* filename, int drv)
 		int readlen = filesystem.ReadFile(filename, disk[drv].data, DISKSIZE);
 		if (readlen != DISKSIZE)
 		{
-			Serial.printf("Read Floppy Fail : %s\n",filename);
+			LOGF("Read Floppy Fail : %s\n",filename);
 			return false;
 		}
 	}
@@ -143,7 +143,7 @@ bool DiskIICard::InsertFloppy(const char* filename, int drv)
 		if (readlen != DskImage::IMAGE_BYTES || size != (size_t)DskImage::IMAGE_BYTES)
 		{
 			// 800K .po, .2mg headers and short files all end up here
-			Serial.printf("Read Floppy Fail : %s (%u bytes, want %d)\n", filename, (unsigned)size, DskImage::IMAGE_BYTES);
+			LOGF("Read Floppy Fail : %s (%u bytes, want %d)\n", filename, (unsigned)size, DskImage::IMAGE_BYTES);
 			return false;
 		}
 		DskImage::NibblizeInPlace(disk[drv].data,
@@ -151,11 +151,11 @@ bool DiskIICard::InsertFloppy(const char* filename, int drv)
 	}
 	else
 	{
-		Serial.printf("Read Floppy Fail : %s (not a .nib, .dsk, .do or .po)\n", filename);
+		LOGF("Read Floppy Fail : %s (not a .nib, .dsk, .do or .po)\n", filename);
 		return false;
 	}
 
-	Serial.printf("Read Floppy OK : %s\n",filename);
+	LOGF("Read Floppy OK : %s\n",filename);
 	sprintf(disk[drv].filename, "%s", filename);
 
 	// For now, proceed in write-disabled mode

@@ -39,6 +39,7 @@ public:
 
 private:
 	void LoadRoms();
+	void InstallSerialCard();
 	bool Booting();
 
 public:
@@ -49,6 +50,7 @@ public:
 	void Reset();
 	void WarmReset();
 	bool Mount(const char* path, int drive);
+	bool SetSerialSlot(int slot, bool capture);
 	void Unmount(int drive);
 	void Run(long long cycle);
 	void Render(VGA *vga, int frame);

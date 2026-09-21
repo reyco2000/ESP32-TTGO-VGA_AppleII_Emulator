@@ -70,6 +70,51 @@ public:
 		return ok;
 	}
 
+	// Slot the Super Serial Card sits in: 0 = not installed, 1-7 a slot.
+	static uint8_t LoadSerial(uint8_t def)
+	{
+		Preferences p;
+		if (!p.begin(NS, true))
+			return def;
+		uint8_t slot = p.getUChar("ssc", def);
+		p.end();
+		return slot > 7 ? def : slot;
+	}
+
+	// false when NVS could not be written
+	static bool SaveSerial(uint8_t slot)
+	{
+		Preferences p;
+		if (!p.begin(NS, false))
+			return false;
+		bool ok = p.putUChar("ssc", slot) == 1;
+		p.end();
+		return ok;
+	}
+
+	// Whether the serial card also writes what it sends to a file on the SD
+	// card (/printer/print-NNN.txt).
+	static bool LoadPrintCapture(bool def)
+	{
+		Preferences p;
+		if (!p.begin(NS, true))
+			return def;
+		bool on = p.getBool("sscsd", def);
+		p.end();
+		return on;
+	}
+
+	// false when NVS could not be written
+	static bool SavePrintCapture(bool on)
+	{
+		Preferences p;
+		if (!p.begin(NS, false))
+			return false;
+		bool ok = p.putBool("sscsd", on) == 1;
+		p.end();
+		return ok;
+	}
+
 	// Mounted disk image path for drive 0 or 1, "" when the drive is empty.
 	static String LoadDisk(int drive)
 	{

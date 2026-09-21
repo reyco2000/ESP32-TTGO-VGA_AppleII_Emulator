@@ -84,6 +84,10 @@ void setup()
     // before anything else can fail or hang. A no-op in the standalone build.
     Bootloader::ReleaseOtadata();
 
+    // A bigger receive buffer than the default 256 bytes: the Super Serial
+    // Card takes one byte per frame out of it, so a burst typed or pasted at
+    // the other end has to wait here.
+    Serial.setRxBufferSize(1024);
     Serial.begin(115200);
     Serial.printf("\nESP32-AppleII v%s (%s build)\n", FW_VERSION_STR, Bootloader::TargetName());
     
@@ -253,15 +257,15 @@ static void RunFrame()
     if(millis() - heapCheckMillis > 15000)
     {
         heapCheckMillis = millis();
-        Serial.printf("Heap : %d / %d\n", ESP.getFreeHeap(), ESP.getHeapSize());
-        Serial.printf("PSRam : %d / %d\n", ESP.getFreePsram(), ESP.getPsramSize());
+        LOGF("Heap : %d / %d\n", ESP.getFreeHeap(), ESP.getHeapSize());
+        LOGF("PSRam : %d / %d\n", ESP.getFreePsram(), ESP.getPsramSize());
     }
 
     fpscount++;
     if(millis() - fpsMillis > 1000)
     {
         fpsMillis = millis();
-        Serial.printf("FPS : %d\n", fpscount);
+        LOGF("FPS : %d\n", fpscount);
         // feeds the F2 on-screen counter (drawn by Apple2Device::Render)
         machine->device.fpsValue = fpscount;
         fpscount = 0;

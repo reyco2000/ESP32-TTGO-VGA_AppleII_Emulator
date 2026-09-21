@@ -30,10 +30,25 @@
 #include "Arduino.h"
 
 
-#define DEBUG_PRINTLN(a) Serial.println(a)
-#define DEBUG_PRINT(a) Serial.print(a)
-#define DEBUG_PRINTLNF(a, f) Serial.println(a, f)
-#define DEBUG_PRINTF(a, f) Serial.print(a, f)
+// The Super Serial Card sends the Apple's data out of the same USB UART
+// this log uses, so installing that card silences everything the firmware
+// would print from then on. The boot messages are already out by then.
+struct Log
+{
+	static bool& Muted() { static bool muted = false; return muted; }
+	static bool On() { return !Muted(); }
+	static void Mute() { Muted() = true; }
+};
+
+// Log lines printed while the machine is running go through these, so that
+// muting reaches them. Boot-time messages may use Serial directly.
+#define LOGF(...)   do { if (Log::On()) Serial.printf(__VA_ARGS__); } while (0)
+#define LOGLN(a)    do { if (Log::On()) Serial.println(a); } while (0)
+
+#define DEBUG_PRINTLN(a) LOGLN(a)
+#define DEBUG_PRINT(a) do { if (Log::On()) Serial.print(a); } while (0)
+#define DEBUG_PRINTLNF(a, f) do { if (Log::On()) Serial.println(a, f); } while (0)
+#define DEBUG_PRINTF(a, f) do { if (Log::On()) Serial.print(a, f); } while (0)
 /*
 #define DEBUG_PRINTLN(a) ;
 #define DEBUG_PRINT(a) ;
