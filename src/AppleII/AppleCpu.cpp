@@ -213,14 +213,14 @@ void CPU::SetOverflow(BYTE oldv0, BYTE v0, BYTE v1)
 	Flag.V = sign0 && sign1;
 }
 
-BYTE CPU::Fetch(Memory& mem, long long &cycle)
+BYTE CPU::Fetch(Memory& mem, Cycles& cycle)
 {
 	BYTE c = mem.ReadByte(PC++);
 	cycle--;
 	return c;
 }
 
-WORD CPU::FetchWord(Memory& mem, long long &cycle)
+WORD CPU::FetchWord(Memory& mem, Cycles& cycle)
 {
 	BYTE c0 = mem.ReadByte(PC++);
 	BYTE c1 = mem.ReadByte(PC++);
@@ -232,27 +232,27 @@ WORD CPU::FetchWord(Memory& mem, long long &cycle)
 }
 
 // Reads memory without consuming a cycle, independent of PC (zero page and the like)
-BYTE CPU::ReadByte(Memory& mem, WORD addr, long long &cycle)
+BYTE CPU::ReadByte(Memory& mem, WORD addr, Cycles& cycle)
 {
 	BYTE c = mem.ReadByte(addr);
 	cycle--;
 	return c;
 }
 
-WORD CPU::ReadWord(Memory& mem, WORD addr, long long &cycle)
+WORD CPU::ReadWord(Memory& mem, WORD addr, Cycles& cycle)
 {
 	WORD c = mem.ReadWord(addr);
 	cycle -= 2;
 	return c;
 }
 
-void CPU::WriteByte(Memory& mem, BYTE value, int addr, long long &cycle)
+void CPU::WriteByte(Memory& mem, BYTE value, int addr, Cycles& cycle)
 {
 	mem.WriteByte(addr, value);
 	cycle --;
 }
 
-void CPU::WriteWord(Memory& mem, WORD value, int addr, long long &cycle)
+void CPU::WriteWord(Memory& mem, WORD value, int addr, Cycles& cycle)
 {
 	mem.WriteWord(value, addr);
 	cycle-=2;
@@ -270,7 +270,7 @@ WORD CPU::GetStackAddress()
 }
 
 // Push a byte onto the stack
-void CPU::PushStackByte(Memory& mem, BYTE value, long long &cycle)
+void CPU::PushStackByte(Memory& mem, BYTE value, Cycles& cycle)
 {
 	WriteByte(mem, value, GetStackAddress(), cycle);
 	SP--;
@@ -278,7 +278,7 @@ void CPU::PushStackByte(Memory& mem, BYTE value, long long &cycle)
 }
 
 // Push a word onto the stack
-void CPU::PushStackWord(Memory& mem, WORD value, long long &cycle)
+void CPU::PushStackWord(Memory& mem, WORD value, Cycles& cycle)
 {
 	// Hi byte first
 	WriteByte(mem, value >> 8, GetStackAddress(), cycle);
@@ -289,7 +289,7 @@ void CPU::PushStackWord(Memory& mem, WORD value, long long &cycle)
 }
 
 // Pop 1 byte off the stack
-BYTE CPU::PopStackByte(Memory& mem, long long &cycle)
+BYTE CPU::PopStackByte(Memory& mem, Cycles& cycle)
 {
  	SP++;
  	BYTE popbyte = ReadByte(mem, GetStackAddress(), cycle);
@@ -298,7 +298,7 @@ BYTE CPU::PopStackByte(Memory& mem, long long &cycle)
 }
 
 // Pop a word off the stack
-WORD CPU::PopStackWord(Memory& mem, long long &cycle)
+WORD CPU::PopStackWord(Memory& mem, Cycles& cycle)
 {
 	SP++;
 	BYTE lo = ReadByte(mem, GetStackAddress(), cycle);
@@ -310,16 +310,16 @@ WORD CPU::PopStackWord(Memory& mem, long long &cycle)
 	return popWord;
 }
 
-int CPU::Run(Memory &mem, long long _cycle)
+int CPU::Run(Memory &mem, Cycles _cycle)
 {
 
-	long long cycle = _cycle;
+	Cycles cycle = _cycle;
 	runStartTick = tick;
 	runBudget = _cycle;
 	runCycle = &cycle;
 	while (cycle > 0)
 	{
-		long long prevcycle = cycle;
+		Cycles prevcycle = cycle;
 
 		WORD prevPC = PC;
 		if (PC == 0xBD9E && fastDiskDelay)
@@ -354,12 +354,14 @@ int CPU::Run(Memory &mem, long long _cycle)
 		BYTE inst = Fetch(mem, cycle);
 		lastInst = inst;
 
+#if CPU_TRACE
 		if (enableLog)
 		{
 			printf("A:[%2X] X:[%2X] Y:[%2X] PC:[%4X] ", A, X, Y, prevPC);
 			printf("INST : [%2X] / C:[%d] Z:[%d] I:[%d] D:[%d] B:[%d] U:[%d] V:[%d] N:[%d]\n", inst,
 				Flag.C, Flag.Z, Flag.I, Flag.D, Flag.B, Flag.Unused, Flag.V, Flag.N);
 		}
+#endif
 
 		switch (inst)
 		{
@@ -1838,14 +1840,14 @@ int CPU::Run(Memory &mem, long long _cycle)
 	return 0;//CyclesRequested - cycle;
 }
 
-void CPU::LoadToRegister(Memory& mem, long long &cycle, BYTE &reg)
+void CPU::LoadToRegister(Memory& mem, Cycles& cycle, BYTE &reg)
 {
 	reg = Fetch(mem, cycle);
 	SetZeroNegative(reg);
 }
 
 // Load the value at ZP into a register
-void CPU::LoadToRegisterFromZP(Memory& mem, long long &cycle, BYTE& reg)
+void CPU::LoadToRegisterFromZP(Memory& mem, Cycles& cycle, BYTE& reg)
 {
 	BYTE zpa = Fetch(mem, cycle);
 	reg = ReadByte(mem, zpa, cycle);
@@ -1855,14 +1857,14 @@ void CPU::LoadToRegisterFromZP(Memory& mem, long long &cycle, BYTE& reg)
 ////////////////////////////////////////////////////////////////////////////// memory addressing mode
 
 // ZeroPage
-WORD  CPU::addr_mode_ZP(Memory &mem, long long &cycle)
+WORD  CPU::addr_mode_ZP(Memory &mem, Cycles& cycle)
 {
 	BYTE address = Fetch(mem, cycle);
 	return address;
 }
 
 // Zero page + X
-WORD CPU::addr_mode_ZPX(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_ZPX(Memory& mem, Cycles& cycle)
 {
 	BYTE address = Fetch(mem, cycle) + X;
 	cycle--;
@@ -1870,7 +1872,7 @@ WORD CPU::addr_mode_ZPX(Memory& mem, long long &cycle)
 }
 
 // Zero page + X
-WORD CPU::addr_mode_ZPY(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_ZPY(Memory& mem, Cycles& cycle)
 {
 	BYTE address = Fetch(mem, cycle) + Y;
 	cycle--;
@@ -1878,14 +1880,14 @@ WORD CPU::addr_mode_ZPY(Memory& mem, long long &cycle)
 }
 
 // ABS
-WORD CPU::addr_mode_ABS(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_ABS(Memory& mem, Cycles& cycle)
 {
 	WORD address = FetchWord(mem, cycle);
 	return address;
 }
 
 // ABS + X
-WORD CPU::addr_mode_ABSX(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_ABSX(Memory& mem, Cycles& cycle)
 {
 #if 1
 	BYTE lo = Fetch(mem, cycle);
@@ -1907,7 +1909,7 @@ WORD CPU::addr_mode_ABSX(Memory& mem, long long &cycle)
 }
 
 // ABS + X : page crossing ignored (the hardware is simply built this way)
-WORD CPU::addr_mode_ABSX_NoPage(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_ABSX_NoPage(Memory& mem, Cycles& cycle)
 {
 	WORD address = FetchWord(mem, cycle);
 	address += X;
@@ -1916,7 +1918,7 @@ WORD CPU::addr_mode_ABSX_NoPage(Memory& mem, long long &cycle)
 }
 
 // ABS + Y
-WORD CPU::addr_mode_ABSY(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_ABSY(Memory& mem, Cycles& cycle)
 {
 	BYTE lo = Fetch(mem, cycle);
 	BYTE hi = Fetch(mem, cycle);
@@ -1927,7 +1929,7 @@ WORD CPU::addr_mode_ABSY(Memory& mem, long long &cycle)
 	return address;
 }
 
-WORD CPU::addr_mode_ABSY_NoPage(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_ABSY_NoPage(Memory& mem, Cycles& cycle)
 {
 	WORD address = FetchWord(mem, cycle);
 	address += Y;
@@ -1935,7 +1937,7 @@ WORD CPU::addr_mode_ABSY_NoPage(Memory& mem, long long &cycle)
 	return address;
 }
 
-WORD CPU::addr_mode_INDX(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_INDX(Memory& mem, Cycles& cycle)
 {
 	BYTE t = Fetch(mem, cycle);
 	BYTE inx = t + X;
@@ -1946,7 +1948,7 @@ WORD CPU::addr_mode_INDX(Memory& mem, long long &cycle)
 }
 
 
-WORD CPU::addr_mode_INDY(Memory& mem, long long &cycle)
+WORD CPU::addr_mode_INDY(Memory& mem, Cycles& cycle)
 {
 #if 1
 	// Read a word from zero page, add the Y register, and load the byte at that address into A
@@ -2075,7 +2077,7 @@ void CPU::Execute_CPY(BYTE v)
 	Flag.C = (Y >= v) != 0;
 }
 
-void CPU::Execute_ASL(BYTE &v, long long &cycle)
+void CPU::Execute_ASL(BYTE &v, Cycles& cycle)
 {
 	Flag.C = (v & FLAG_NEGATIVE) > 0;
 	v = v << 1;
@@ -2083,7 +2085,7 @@ void CPU::Execute_ASL(BYTE &v, long long &cycle)
 	SetZeroNegative(v);
 }
 
-void CPU::Execute_LSR(BYTE& v, long long &cycle)
+void CPU::Execute_LSR(BYTE& v, Cycles& cycle)
 {
 	Flag.C = (v & 0x01);
 	v = v >> 1;
@@ -2098,7 +2100,7 @@ void CPU::Execute_LSR(BYTE& v, long long &cycle)
   Operation:   +-< |7|6|5|4|3|2|1|0| <- |C| <-+         N Z C I D V
 				   +-+-+-+-+-+-+-+-+    +-+             / / / _ _ _
 */
-void CPU::Execute_ROL(BYTE& v, long long &cycle)
+void CPU::Execute_ROL(BYTE& v, Cycles& cycle)
 {
 	// Fill bit 0 after the shift with the previous carry flag value
 	BYTE oldcarry = Flag.C ? 0x01 : 0x00;
@@ -2116,7 +2118,7 @@ void CPU::Execute_ROL(BYTE& v, long long &cycle)
   Operation:   +-> |C| -> |7|6|5|4|3|2|1|0| >-+         N Z C I D V
 				   +-+    +-+-+-+-+-+-+-+-+             / / / _ _ _
 */
-void CPU::Execute_ROR(BYTE& v, long long &cycle)
+void CPU::Execute_ROR(BYTE& v, Cycles& cycle)
 {
 	// Is the lowest bit 1? -> it becomes the next carry bit
 	BYTE oldcarry = (v & FLAG_CARRY) > 0;
@@ -2129,7 +2131,7 @@ void CPU::Execute_ROR(BYTE& v, long long &cycle)
 }
 
 
-void CPU::Execute_BRANCH(bool v, bool condition, Memory &mem, long long &cycle)
+void CPU::Execute_BRANCH(bool v, bool condition, Memory &mem, Cycles& cycle)
 {
 	SBYTE offset = (SBYTE)Fetch(mem, cycle);
 	if (v == condition)

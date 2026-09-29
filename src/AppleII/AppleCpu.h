@@ -24,6 +24,17 @@
 #include <map>
 #include <string>
 
+// A Run() call's cycle budget and what is left of it. A budget is at most a
+// few hundred thousand cycles, so 32 bits are plenty; the ESP32 is a 32-bit
+// CPU and a 64-bit count cost it on every bus access. The running total
+// since reset (tick) stays 64-bit.
+typedef int32_t Cycles;
+
+// CPU_TRACE 1: print every instruction when enableLog is set (host debugging)
+#ifndef CPU_TRACE
+#define CPU_TRACE 0
+#endif
+
 class Memory;
 
 
@@ -345,9 +356,9 @@ private:
 	// Run()'s live cycle budget. It already lives in memory because every
 	// helper takes it by reference, so exposing it costs nothing, where
 	// updating tick after every instruction measurably did.
-	long long* runCycle;
+	Cycles* runCycle;
 	long long  runStartTick;
-	long long  runBudget;
+	Cycles  runBudget;
 
 public:
 	CPU();
@@ -358,7 +369,7 @@ public:
 	void Reboot(Memory& mem);
 
 	void SetPCAddress(WORD addr);
-	int Run(Memory& mem, long long cycle);
+	int Run(Memory& mem, Cycles cycle);
 
 	void SetRegister(BYTE type, BYTE value);
 	BYTE GetRegister(BYTE type);
@@ -372,51 +383,51 @@ public:
 	void SetCarryFlagNegative(WORD value);
 	void SetOverflow(BYTE oldv0, BYTE v0, BYTE v1);
 
-	BYTE Fetch(Memory& mem, long long& cycle);
-	WORD FetchWord(Memory& mem, long long& cycle);
+	BYTE Fetch(Memory& mem, Cycles& cycle);
+	WORD FetchWord(Memory& mem, Cycles& cycle);
 
-	BYTE ReadByte(Memory& mem, WORD add, long long& cycle);
-	WORD ReadWord(Memory& mem, WORD addr, long long& cycle);
+	BYTE ReadByte(Memory& mem, WORD add, Cycles& cycle);
+	WORD ReadWord(Memory& mem, WORD addr, Cycles& cycle);
 
-	void WriteByte(Memory& mem, BYTE value, int addr, long long& cycle);
-	void WriteWord(Memory& mem, WORD value, int addr, long long& cycle);
+	void WriteByte(Memory& mem, BYTE value, int addr, Cycles& cycle);
+	void WriteWord(Memory& mem, WORD value, int addr, Cycles& cycle);
 
 	//////////////////////////////////////////////////////////////////////////
 
 	// memory Addressing mode
 	// Zero page
-	WORD addr_mode_ZP(Memory& mem, long long& cycle);
+	WORD addr_mode_ZP(Memory& mem, Cycles& cycle);
 	// Zero page + X
-	WORD addr_mode_ZPX(Memory& mem, long long& cycle);
+	WORD addr_mode_ZPX(Memory& mem, Cycles& cycle);
 	// Zero page + X
-	WORD addr_mode_ZPY(Memory& mem, long long& cycle);
+	WORD addr_mode_ZPY(Memory& mem, Cycles& cycle);
 	// ABS
-	WORD addr_mode_ABS(Memory& mem, long long& cycle);
+	WORD addr_mode_ABS(Memory& mem, Cycles& cycle);
 	// ABS + X
-	WORD addr_mode_ABSX(Memory& mem, long long& cycle);
+	WORD addr_mode_ABSX(Memory& mem, Cycles& cycle);
 	// ABS + X : page crossing ignored
-	WORD addr_mode_ABSX_NoPage(Memory& mem, long long& cycle);
+	WORD addr_mode_ABSX_NoPage(Memory& mem, Cycles& cycle);
 	// ABS + Y
-	WORD addr_mode_ABSY(Memory& mem, long long& cycle);
+	WORD addr_mode_ABSY(Memory& mem, Cycles& cycle);
 	// ABS + Y : page crossing ignored
-	WORD addr_mode_ABSY_NoPage(Memory& mem, long long& cycle);
+	WORD addr_mode_ABSY_NoPage(Memory& mem, Cycles& cycle);
 
 	// Indexed indirect X
-	WORD addr_mode_INDX(Memory& mem, long long& cycle);
+	WORD addr_mode_INDX(Memory& mem, Cycles& cycle);
 	// Indexed indirect Y
-	WORD addr_mode_INDY(Memory& mem, long long& cycle);
+	WORD addr_mode_INDY(Memory& mem, Cycles& cycle);
 
 	//////////////////////////////////////////////////////////////////////////
 
-	void PushStackByte(Memory& mem, BYTE value, long long& cycle);
-	void PushStackWord(Memory& mem, WORD value, long long& cycle);
-	BYTE PopStackByte(Memory& mem, long long& cycle);
-	WORD PopStackWord(Memory& mem, long long& cycle);
+	void PushStackByte(Memory& mem, BYTE value, Cycles& cycle);
+	void PushStackWord(Memory& mem, WORD value, Cycles& cycle);
+	BYTE PopStackByte(Memory& mem, Cycles& cycle);
+	WORD PopStackWord(Memory& mem, Cycles& cycle);
 
 	//////////////////////////////////////////////////////////////////////////
 
-	void LoadToRegister(Memory& mem, long long& cycle, BYTE& reg);
-	void LoadToRegisterFromZP(Memory& mem, long long& cycle, BYTE& reg);
+	void LoadToRegister(Memory& mem, Cycles& cycle, BYTE& reg);
+	void LoadToRegisterFromZP(Memory& mem, Cycles& cycle, BYTE& reg);
 
 	WORD GetStackAddress();
 
@@ -427,20 +438,20 @@ public:
 	void Execute_CMP(BYTE v);
 	void Execute_CPX(BYTE v);
 	void Execute_CPY(BYTE v);
-	void Execute_ASL(BYTE &v, long long& cycle);
-	void Execute_LSR(BYTE& v, long long& cycle);
-	void Execute_ROL(BYTE& v, long long& cycle);
-	void Execute_ROR(BYTE& v, long long& cycle);
+	void Execute_ASL(BYTE &v, Cycles& cycle);
+	void Execute_LSR(BYTE& v, Cycles& cycle);
+	void Execute_ROL(BYTE& v, Cycles& cycle);
+	void Execute_ROR(BYTE& v, Cycles& cycle);
 
-	void Execute_BRANCH(bool v, bool condition, Memory& mem, long long& cycle);
+	void Execute_BRANCH(bool v, bool condition, Memory& mem, Cycles& cycle);
 
 	//////////////////////////////////////////////////////////////////////////	65C02
 
 	// 65C02-only opcodes (AppleCpu65C02.cpp). Returns false for an opcode
 	// the 65C02 does not define either.
-	bool ExecuteCmos(BYTE inst, Memory& mem, long long& cycle);
+	bool ExecuteCmos(BYTE inst, Memory& mem, Cycles& cycle);
 	// (zp) : zero page indirect without an index
-	WORD addr_mode_ZPI(Memory& mem, long long& cycle);
+	WORD addr_mode_ZPI(Memory& mem, Cycles& cycle);
 
 	//////////////////////////////////////////////////////////////////////////	Snapshot
 

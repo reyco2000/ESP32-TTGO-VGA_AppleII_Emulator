@@ -202,7 +202,7 @@ void Apple2Machine::Run(long long cycle)
 	device.UpdateInput();
 	if (device.resetRequested)
 		WarmReset();
-	cpu.Run(mem, cycle);
+	cpu.Run(mem, (Cycles)cycle);
 	while (1)
 	{
 		if( device.UpdateFloppyDisk() == false )
