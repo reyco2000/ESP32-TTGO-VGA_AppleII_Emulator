@@ -140,6 +140,9 @@ void Apple2Machine::WarmReset()
 {
 	device.resetRequested = false;
 	mem.ResetSwitches();
+	// the RESET line reaches the Disk II too: a program that hung with the
+	// drive running stops here, and so does fast-disk mode
+	device.disk6.ResetLine();
 	device.col80 = false;
 	device.altCharset = false;
 	device.dhires = false;

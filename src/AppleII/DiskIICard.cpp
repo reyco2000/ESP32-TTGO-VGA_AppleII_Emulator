@@ -31,6 +31,7 @@ DiskIICard::DiskIICard()
 
 void DiskIICard::Reset()
 {
+	ResetLine();
 	updatedrive = 0;
 	currentDrive = 0;
 	// I/O register
@@ -266,6 +267,16 @@ void DiskIICard::Flush(int drv)
 		}
 	}
 	d.dirtyTracks = 0;
+}
+
+void DiskIICard::ResetLine()
+{
+	for (int drv = 0; drv < 2; drv++)
+	{
+		disk[drv].motorOn = false;
+		disk[drv].writeMode = false;
+		Flush(drv);
+	}
 }
 
 // Floppy disk update

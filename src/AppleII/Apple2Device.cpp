@@ -245,12 +245,6 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 			joystick.Trigger(cpu->CurrentTick());
 			break;
 
-		// $CFFF stops the drive motor, as the original emulator did (on real
-		// hardware it releases the slots' $C800 expansion ROMs)
-		case 0xCFFF:
-			disk6.MotorOff();
-			break;
-
 		// Pushbuttons 0 and 1: on the IIe these are the Open Apple and
 		// Solid Apple keys, here the PC's left and right Alt, or the
 		// mouse's left and right buttons

@@ -67,6 +67,9 @@ public:
 	BYTE Io(int reg, BYTE value, bool write) override;
 	BYTE* SlotRom() override;
 	void Reset() override;
+	// The RESET line (Ctrl-Reset too): clears the card's control latch, so
+	// both motors stop and the drive leaves write mode. The head stays put.
+	void ResetLine();
 
 	bool Mount(const char* path, int drive);
 	void Unmount(int drive);
@@ -77,7 +80,6 @@ public:
 	bool HasFloppy(int drive) { return disk[drive].filename[0] != '\0'; }
 	std::string GetDiskName(int drive) { return disk[drive].filename; }
 	bool MotorOn() { return disk[currentDrive].motorOn; }
-	void MotorOff() { disk[currentDrive].motorOn = false; }
 
 	// While the motor runs, Apple2Machine::Run keeps the CPU going in short
 	// bursts; false once the motor is off or updatedrive wraps to 0.

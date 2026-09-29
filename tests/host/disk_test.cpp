@@ -168,6 +168,27 @@ static void TestUnmountFlushes()
 	       "ejecting saves the changed track");
 }
 
+static void TestResetLineStopsMotor()
+{
+	HostFiles().clear();
+	std::string a = SectorImage(9), b = SectorImage(10);
+	HostFiles()["/m.dsk"] = a;
+	DiskIICard card;
+	card.Mount("/m.dsk", 0);
+	card.Io(R_MOTOR_ON, 0, false);
+	expect(card.MotorOn(), "motor on");
+	WriteTrack(card, Track0(b, ORDER_DOS).data());
+	card.ResetLine();
+	expect(!card.MotorOn(), "Ctrl-Reset stops the motor");
+	expect(HostFiles()["/m.dsk"].compare(0, TRACK_BYTES, b, 0, TRACK_BYTES) == 0,
+	       "Ctrl-Reset saves what was written");
+
+	card.Io(R_MOTOR_ON, 0, false);
+	card.Reset();
+	expect(!card.MotorOn(), "power-up reset stops the motor");
+	expect(card.HasFloppy(0), "and keeps the disk inserted");
+}
+
 int main()
 {
 	TestSectorWriteBack("/t.dsk", ORDER_DOS, ".dsk");
@@ -177,6 +198,7 @@ int main()
 	TestUndecodableTrackNotSaved();
 	TestWriteFailureProtects();
 	TestUnmountFlushes();
+	TestResetLineStopsMotor();
 
 	if (failures)
 	{

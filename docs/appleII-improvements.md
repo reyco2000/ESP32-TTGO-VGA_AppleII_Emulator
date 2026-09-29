@@ -2885,5 +2885,5 @@ Fill in after each measured task (MAX speed for PERF rows).
 | 3 | 34 | 223 | 22,571 | 17,429 | idle 317 / 350 (was 522 / 6,300); Karateka 3,740 / 18,301 | — |
 | 4 | 34 | 226 | 22,553 | 17,411 | idle 322 / 354; Karateka 1,957 / 7,772 | 76,036 / 63,476 |
 | 5 | 40 | 266 | 19,353 (same 98 motor events/PCs) | 14,992 | — | 76,036 / 63,476 |
-| 8 | | | | | | |
+| 8 | 40 | 271 | 19,102 (same 98 motor events/PCs) | 14,761 | — | 67,588 / 59,380 (−16.7 KB vs baseline: hires table + two track buffers) |
 | 10 | | | | | | |

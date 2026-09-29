@@ -239,9 +239,6 @@ BYTE Memory::CxAccess(int address, BYTE value, bool write)
 			expSlot = 0;
 			Remap();
 		}
-		// on the ][+ this is also where the Disk II motor is stopped
-		if (device)
-			device->SoftSwitch(this, address, value, write);
 	}
 	else if (iie && page == 0xC3 && !slotC3Rom && !intC8Rom)
 	{
