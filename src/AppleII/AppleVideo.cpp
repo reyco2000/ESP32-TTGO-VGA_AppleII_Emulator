@@ -11,7 +11,8 @@
  *           hires and double hires from emulated memory into the 640x200 VGA
  *           framebuffer as palette indices: a 560x192 screen, each
  *           40-column dot two pixels wide, centred in a black
- *           border. Per-cell dirty caches skip unchanged cells.
+ *           border. Per-cell dirty caches skip unchanged cells;
+ *           hires dots come from HiresRender's lookup table.
  *           Also draws the F2 FPS overlay.
  * ============================================================
 */
@@ -22,6 +23,7 @@
 #include "Apple2Device.h"
 #include "../VGA/VGA.h"
 #include "FramePacer.h"
+#include "HiresRender.h"
 
 // The Apple screen, 280x192 dots at double width, centred on the framebuffer.
 // X0 is even, so every 40-column dot is one whole framebuffer byte.
@@ -80,16 +82,6 @@ static const VGAColor applePalette[16] =
 #define A2_GREEN    12
 #define A2_WHITE    15
 
-// Hires colours, indexed by even * 8 + colour set * 4 + dot * 2 + previous
-// dot, as the renderer always has. The old RGB renderer drew the "even"
-// half in darker shades; with 16 palette entries they take the full colour
-// of the same hue.
-static const BYTE hiresColor[16] =
-{
-	A2_BLACK, A2_GREEN,  A2_VIOLET, A2_WHITE, A2_BLACK, A2_ORANGE, A2_BLUE,   A2_WHITE,
-	A2_BLACK, A2_VIOLET, A2_GREEN,  A2_WHITE, A2_BLACK, A2_BLUE,   A2_ORANGE, A2_WHITE
-};
-
 AppleVideo::AppleVideo()
 {
 	vga = NULL;
@@ -103,6 +95,7 @@ AppleVideo::AppleVideo()
 void AppleVideo::Create()
 {
 	font.Create();
+	HiresRender::Init();
 }
 
 void AppleVideo::LoadCharRom(const BYTE* rom)
@@ -367,7 +360,6 @@ void AppleVideo::RenderDoubleHires(Memory& mem, int page, int lines)
 void AppleVideo::RenderHires(Memory& mem, int page, int lines)
 {
 	WORD base = page * 0x2000;
-	BYTE bits[16];
 
 	for (int line = 0; line < lines; line++)
 	{
@@ -378,37 +370,18 @@ void AppleVideo::RenderHires(Memory& mem, int page, int lines)
 		// for every 14 horizontal dots
 		for (int col = 0; col < SCREENTEXT_X; col += 2)
 		{
-			WORD word = ((WORD)src[col + 1] << 8) | src[col];                         // the two bytes, in reverse order
-
-			// check if this group of dots needs a redraw
+			WORD word = ((WORD)src[col + 1] << 8) | src[col];
 			if (HiResCache[line][col] == word)
 				continue;
+			HiResCache[line][col] = word;
 
-			for (int bit = 0; bit < 16; bit++)                                        // store all bits 'word' into 'bits'
-				bits[bit] = (word >> bit) & 1;
+			BYTE pbit = HiresRender::DrawCell(src[col], src[col + 1], previousBit[line][col], out + col * 7);
 
-			int x = col * 7;
-			BYTE colorSet = bits[7] * 4;                                               // select the right color set
-			BYTE pbit = previousBit[line][col];                                        // the bit value of the left dot
-			BYTE even = 0;
-			int bit = 0;                                                               // starting at 1st bit of 1st byte
-
-			while (bit < 15)
-			{                                                                          // until we reach bit7 of 2nd byte
-				if (bit == 7)
-				{                                                                      // moving into the second byte
-					colorSet = bits[15] * 4;                                           // update the color set
-					bit++;                                                             // skip bit 7
-				}
-				out[x++] = hiresColor[even + colorSet + (bits[bit] << 1) + pbit] * 0x11;
-				pbit = bits[bit++];                                                    // proceed to the next dot
-				even = even ? 0 : 8;                                                   // alternate dots take the "even" colours
-			}
-
-			HiResCache[line][col] = word;                                             // update the video cache
-			if ((col < 37) && (previousBit[line][col + 2] != pbit)) {                 // check color franging effect on the dot after
-				previousBit[line][col + 2] = pbit;                                    // set pbit and clear the
-				HiResCache[line][col + 2] = -1;                                       // video cache for next dot
+			// the next cell's first dot takes its colour from our last one
+			if (col < 37 && previousBit[line][col + 2] != pbit)
+			{
+				previousBit[line][col + 2] = pbit;
+				HiResCache[line][col + 2] = -1;
 			}
 		}
 	}

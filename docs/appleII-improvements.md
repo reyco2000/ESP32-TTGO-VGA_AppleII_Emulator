@@ -2883,7 +2883,7 @@ Fill in after each measured task (MAX speed for PERF rows).
 | 0 (baseline, unpaced) | 34 (68,200 cyc/pass ≈ 227%) | n/a | 22,623 (90 motor events) | 17,331 | idle 522 / 6,300; Karateka 4,186 / 18,672 | 84,252 / 63,476 (PERF build, no SSC) |
 | 2 (paced; PERF = MAX) | 34 (1X: 61) | 221 (1X: 100) | 22,601 (1X: 22,667) | 17,443 (1X: 19,372) | Karateka 4,194 / 18,667 | 84,228 / 63,476 |
 | 3 | 34 | 223 | 22,571 | 17,429 | idle 317 / 350 (was 522 / 6,300); Karateka 3,740 / 18,301 | — |
-| 4 | | | | | | |
+| 4 | 34 | 226 | 22,553 | 17,411 | idle 322 / 354; Karateka 1,957 / 7,772 | 76,036 / 63,476 |
 | 5 | | | | | | |
 | 8 | | | | | | |
 | 10 | | | | | | |
