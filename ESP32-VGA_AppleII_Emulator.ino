@@ -214,6 +214,12 @@ void setup()
         Settings::SaveDisk(drive, "");
         remounted |= machine->Mount(path.c_str(), drive);
     }
+    String hd = Settings::LoadHardDisk();
+    if (hd.length() > 0)
+    {
+        Settings::SaveHardDisk("");
+        remounted |= machine->MountHardDisk(hd.c_str());
+    }
     if (remounted)
         machine->Reset();
 

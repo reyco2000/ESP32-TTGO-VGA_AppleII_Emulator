@@ -21,6 +21,7 @@
 #include "AppleVideo.h"
 #include "DiskIICard.h"
 #include "SuperSerialCard.h"
+#include "HardDiskCard.h"
 #include "Joystick.h"
 #include "FramePacer.h"
 #include "../Tools/Log.h"
@@ -49,6 +50,7 @@ public:
 	Card* slots[8];
 	DiskIICard disk6;
 	SuperSerialCard ssc;
+	HardDiskCard hdd7;               // slot 7, shows up once an image is mounted
 
 	// Paddles 0/1 and pushbuttons 0/1, moved by the PS/2 mouse. Not in
 	// Reset(): an emulated reset leaves the stick where it is.

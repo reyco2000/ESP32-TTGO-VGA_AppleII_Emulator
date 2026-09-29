@@ -26,12 +26,16 @@
 #include "../BuildConfig.h"
 
 Apple2Machine::Apple2Machine(const MachineProfile& p)
-	: profile(p), bootNote("")
+	: profile(p), bootNote(""), bus(mem)
 {
 	DEBUG_PRINTLN("Construct Apple2Machine");
 	cpu.cmos = (profile.cpu == CPU_65C02);
 	device.iie = profile.iieMmu;
 	device.slots[6] = profile.diskIISlot6 ? &device.disk6 : NULL;
+	// slot 7: the autostart ROM scans down from here, so a mounted hard disk
+	// boots before the floppies, as on a real machine with one fitted
+	device.hdd7.Configure(7, &bus);
+	device.slots[7] = &device.hdd7;
 }
 
 Apple2Machine::~Apple2Machine()
@@ -183,6 +187,20 @@ bool Apple2Machine::SetSerialSlot(int slot, bool capture)
 		Log::Mute();
 	}
 	return ok;
+}
+
+bool Apple2Machine::MountHardDisk(const char* path)
+{
+	bool ok = device.hdd7.Mount(path);
+	// the card shows or hides its firmware with the image
+	mem.Remap();
+	return ok;
+}
+
+void Apple2Machine::UnmountHardDisk()
+{
+	device.hdd7.Unmount();
+	mem.Remap();
 }
 
 void Apple2Machine::Unmount(int drive)

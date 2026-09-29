@@ -25,6 +25,17 @@
 
 class VGA;
 
+// The hard disk card's view of memory: whatever the CPU sees right now.
+class MemoryBus : public CardBus
+{
+public:
+	explicit MemoryBus(Memory& m) : mem(m) {}
+	BYTE Read(WORD addr) override { return mem.ReadByte(addr); }
+	void Write(WORD addr, BYTE value) override { mem.WriteByte(addr, value); }
+private:
+	Memory& mem;
+};
+
 class Apple2Machine
 {
 public:
@@ -36,6 +47,8 @@ public:
 	// Why the model saved in NVS could not be booted, "" when it was.
 	// Set by setup(), shown by the supervisor.
 	const char* bootNote;
+	// the hard disk card's window on memory
+	MemoryBus bus;
 
 private:
 	void LoadRoms();
@@ -52,6 +65,9 @@ public:
 	bool Mount(const char* path, int drive);
 	bool SetSerialSlot(int slot, bool capture);
 	void Unmount(int drive);
+	// the hard disk in slot 7
+	bool MountHardDisk(const char* path);
+	void UnmountHardDisk();
 	void Run(long long cycle);
 	void Render(VGA *vga, int frame);
 

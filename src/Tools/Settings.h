@@ -158,6 +158,27 @@ public:
 		return ok;
 	}
 
+	// Hard disk image in slot 7, "" when none: saved across a machine switch
+	static String LoadHardDisk()
+	{
+		Preferences p;
+		if (!p.begin(NS, true))
+			return String();
+		String path = p.getString("hd", "");
+		p.end();
+		return path;
+	}
+
+	static bool SaveHardDisk(const char* path)
+	{
+		Preferences p;
+		if (!p.begin(NS, false))
+			return false;
+		p.putString("hd", path ? path : "");
+		p.end();
+		return true;
+	}
+
 private:
 	static constexpr const char* NS = "apple2";
 	static const char* DiskKey(int drive) { return drive == 0 ? "d1" : "d2"; }
