@@ -48,7 +48,8 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
   - **Apple //e (enhanced)** — 65C02, 128K with the auxiliary 64K, 80-column text, lowercase and MouseText. Needs its ROM files on the SD card (see [ROM files](#rom-files)).
 - 6502 and 65C02 CPU cores checked against Klaus Dormann's functional test suites, run on the build machine (`tests/host/run-cpu-tests.sh`)
 - Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not yet verified — see TODO)
-- **Two emulated Disk II drives** that take 140K sector images (`.dsk` / `.do` in DOS 3.3 order, `.po` in ProDOS order) and nibblized `.nib` images
+- **Two emulated Disk II drives** that take 140K sector images (`.dsk` / `.do` in DOS 3.3 order, `.po` in ProDOS order) and nibblized `.nib` images. What programs write to a disk is saved back to its image on the SD card when the drive stops or the disk is ejected — keep copies of images you care about
+- **ProDOS hard disks** (`.hdv`, ProDOS-order `.2mg`, and `.po` images bigger than 140K, up to 32 MB) in slot 7, read and written a block at a time straight from the SD card. A mounted hard disk boots before the floppies
 - **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount disk images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with **MACHINE**, pick the keyboard layout with **KEYBOARD**, put a Super Serial Card in a slot with **SERIAL**, or open **ABOUT** for the firmware version and credits. The arrow keys move between the buttons and the file list. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
 - **Runs standalone or under [ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader)**: flash it on its own over USB, or put it on the SD card as one entry in the bootloader's multi-emulator menu. Every release ships both builds (see [ESP32_Bootloader](#esp32_bootloader-sd-card-menu))
@@ -172,6 +173,10 @@ The CPU cores have host-side tests that run on the build machine rather than the
 ```bash
 tests/host/run-cpu-tests.sh      # Klaus Dormann's 6502 and 65C02 suites, both must PASS
 tests/host/run-dsk-tests.sh      # .dsk/.po nibblizer, round-tripped through an RWTS-style decoder
+tests/host/run-disk-tests.sh     # Disk II write-back to .dsk/.po/.nib, reset stopping the motor
+tests/host/run-hdd-tests.sh      # hard disk card: firmware bytes, ProDOS block commands, .2mg headers
+tests/host/run-pacer-tests.sh    # frame pacing: 1X real time, MAX, fast disk, frame skipping
+tests/host/run-hires-tests.sh    # hires lookup table against the old per-dot renderer, every cell
 ```
 
 ## SD Card Setup
@@ -208,7 +213,7 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 ## Usage
 
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
-- Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (then `1`/`2` picks the drive), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
+- Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (then `1`/`2` picks the drive; a hard disk image mounts in slot 7 straight away, and picking the mounted one again ejects it), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
 - **MACHINE** switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
 - **SERIAL** installs or removes the Super Serial Card, and turns the SD card capture file on and off (see [Super Serial Card](#super-serial-card)).
 - **KEYBOARD** picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
