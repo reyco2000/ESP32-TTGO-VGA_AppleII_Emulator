@@ -34,6 +34,8 @@ struct FloppyDrive
 	bool writeMode;
 	BYTE track;
 	WORD nibble;
+	DskImage::ImageType type;   // how 'data' maps back to the file
+	uint64_t dirtyTracks;       // bit t: track t written since the last Flush
 
 	FloppyDrive()
 	{
@@ -50,6 +52,8 @@ struct FloppyDrive
 		writeMode = false;
 		track = 0;
 	 	nibble = 0;
+		type = DskImage::IMAGE_NONE;
+		dirtyTracks = 0;
 	}
 };
 
@@ -66,6 +70,9 @@ public:
 
 	bool Mount(const char* path, int drive);
 	void Unmount(int drive);
+	// Writes the tracks changed since the last flush back to the image file.
+	// Called when the motor stops, the drive is deselected, and on eject.
+	void Flush(int drive);
 	void EjectAll();
 	bool HasFloppy(int drive) { return disk[drive].filename[0] != '\0'; }
 	std::string GetDiskName(int drive) { return disk[drive].filename; }
