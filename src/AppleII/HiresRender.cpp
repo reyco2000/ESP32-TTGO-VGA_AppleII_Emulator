@@ -55,4 +55,17 @@ uint8_t DrawCell(uint8_t b0, uint8_t b1, uint8_t pbit, uint8_t* out)
 	return (b1 >> 6) & 1;
 }
 
+void DrawLine(const uint8_t* src, int* cache, uint8_t* out)
+{
+	for (int col = 0; col < 40; col += 2)
+	{
+		int left = col ? (src[col - 1] >> 6) & 1 : 0;
+		int key = src[col] | (src[col + 1] << 8) | (left << 16);
+		if (cache[col] == key)
+			continue;
+		cache[col] = key;
+		DrawCell(src[col], src[col + 1], left, out + col * 7);
+	}
+}
+
 }

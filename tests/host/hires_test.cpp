@@ -10,7 +10,8 @@
  *  Module : Host-side hires renderer test: the lookup-table
  *           HiresRender::DrawCell against the per-dot loop
  *           AppleVideo::RenderHires used before it, for every pair
- *           of bytes and both left neighbours.
+ *           of bytes and both left neighbours; and DrawLine, the
+ *           cached line renderer built on it.
  *           Driven by tests/host/run-hires-tests.sh.
  * ============================================================
 */
@@ -87,9 +88,56 @@ static void TestEveryCell()
 	expect(bad == 0, "every cell matches the old renderer, and nothing past its 14 bytes is written");
 }
 
+// A whole line as the screen should show it: every cell drawn fresh, each
+// taking its left dot from the byte before it
+static void FreshLine(const uint8_t* src, uint8_t* out)
+{
+	for (int col = 0; col < 40; col += 2)
+		HiresRender::DrawCell(src[col], src[col + 1], col ? (src[col - 1] >> 6) & 1 : 0, out + col * 7);
+}
+
+static void TestDrawLine()
+{
+	HiresRender::Init();
+	uint8_t src[40];
+	for (int i = 0; i < 40; i++)
+		src[i] = (uint8_t)(i * 37 + 11);
+	int cache[40];
+	for (int i = 0; i < 40; i++)
+		cache[i] = -1;
+	uint8_t out[280], want[280];
+
+	HiresRender::DrawLine(src, cache, out);
+	FreshLine(src, want);
+	expect(memcmp(out, want, 280) == 0, "DrawLine: a fresh line matches cell-by-cell drawing");
+
+	// the F2 overlay scribbles on the right-hand cells and marks them dirty;
+	// the redraw must give back exactly what was there
+	memset(out + 30 * 7, 0x55, 10 * 7);
+	for (int col = 30; col < 40; col += 2)
+		cache[col] = -1;
+	HiresRender::DrawLine(src, cache, out);
+	expect(memcmp(out, want, 280) == 0, "DrawLine: cells under the overlay come back with the right colours");
+
+	// only the left neighbour's last dot changes: the next cell redraws too
+	src[29] ^= 0x40;
+	HiresRender::DrawLine(src, cache, out);
+	FreshLine(src, want);
+	expect(memcmp(out, want, 280) == 0, "DrawLine: a changed last dot recolours the next cell");
+
+	// nothing changed: nothing is drawn
+	memset(out, 0x77, sizeof(out));
+	HiresRender::DrawLine(src, cache, out);
+	bool untouched = true;
+	for (uint8_t b : out)
+		untouched &= (b == 0x77);
+	expect(untouched, "DrawLine: an unchanged line draws nothing");
+}
+
 int main()
 {
 	TestEveryCell();
+	TestDrawLine();
 	if (failures)
 	{
 		printf("FAIL %d of %d checks\n", failures, checks);

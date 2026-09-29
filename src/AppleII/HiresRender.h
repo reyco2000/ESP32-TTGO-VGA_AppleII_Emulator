@@ -36,6 +36,13 @@ namespace HiresRender
 	// the last dot of the cell to the left (0 at the screen edge). Returns
 	// this cell's last dot: the next cell's pbit.
 	uint8_t DrawCell(uint8_t b0, uint8_t b1, uint8_t pbit, uint8_t* out);
+
+	// One screen line: the 40 bytes at src into out[0..279], redrawing only
+	// cells whose bytes or left dot changed. cache[col] (even col) remembers
+	// what each cell was drawn from; set it to -1 to force a redraw. The left
+	// dot is read from memory, so a cell never depends on another cell's
+	// cache being right.
+	void DrawLine(const uint8_t* src, int* cache, uint8_t* out);
 }
 
 #endif

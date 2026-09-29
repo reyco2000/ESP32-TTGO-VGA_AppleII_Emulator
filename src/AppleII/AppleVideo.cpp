@@ -116,7 +116,6 @@ void AppleVideo::InvalidateCells()
 	memset(LoResCache, 0xFF, sizeof(LoResCache));
 	memset(TextCache, 0xFF, sizeof(TextCache));
 	memset(HiResCache, 0xFF, sizeof(HiResCache));
-	memset(previousBit, 0, sizeof(previousBit));
 }
 
 void AppleVideo::InvalidateRenderCache()
@@ -149,10 +148,7 @@ void AppleVideo::InvalidateFpsOverlayRegion()
 			LoResCache[0][col] = -1;
 		}
 		for (int line = 0; line < FONT_Y; line++)
-		{
 			HiResCache[line][col] = -1;
-			previousBit[line][col] = 0;
-		}
 	}
 	// the same corner in 80-column text
 	for (int col = FPS_COL * 2; col < 80; col++)
@@ -361,28 +357,9 @@ void AppleVideo::RenderHires(Memory& mem, int page, int lines)
 {
 	WORD base = page * 0x2000;
 
+	// one framebuffer byte per Apple dot; HiresRender redraws only the cells
+	// whose bytes, or the dot to their left, changed
 	for (int line = 0; line < lines; line++)
-	{
-		// one framebuffer byte per Apple dot
-		uint8_t* out = vga->row(SCREEN_Y0 + line) + (SCREEN_X0 >> 1);
-		const BYTE* src = mem.ram + base + offsetHGR[line];
-
-		// for every 14 horizontal dots
-		for (int col = 0; col < SCREENTEXT_X; col += 2)
-		{
-			WORD word = ((WORD)src[col + 1] << 8) | src[col];
-			if (HiResCache[line][col] == word)
-				continue;
-			HiResCache[line][col] = word;
-
-			BYTE pbit = HiresRender::DrawCell(src[col], src[col + 1], previousBit[line][col], out + col * 7);
-
-			// the next cell's first dot takes its colour from our last one
-			if (col < 37 && previousBit[line][col + 2] != pbit)
-			{
-				previousBit[line][col + 2] = pbit;
-				HiResCache[line][col + 2] = -1;
-			}
-		}
-	}
+		HiresRender::DrawLine(mem.ram + base + offsetHGR[line], HiResCache[line],
+		                      vga->row(SCREEN_Y0 + line) + (SCREEN_X0 >> 1));
 }

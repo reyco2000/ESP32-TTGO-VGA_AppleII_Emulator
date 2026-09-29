@@ -58,7 +58,6 @@ private:
 	// 80 wide for the IIe's 80-column mode.
 	int TextCache[24][80];
 	int HiResCache[192][40];
-	BYTE previousBit[192][40];
 
 	void InvalidateCells();
 	void RenderText(Memory& mem, const Apple2Device& dev, int page, int firstLine, int frame, bool col80);
