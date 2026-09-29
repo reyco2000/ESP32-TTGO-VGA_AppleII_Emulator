@@ -39,6 +39,7 @@ public:
 	static constexpr int      MAX_SKIP            = 3;           // when late, draw at least every 4th frame
 	static constexpr uint32_t RESYNC_US           = 8 * FRAME_US; // further behind: drop the backlog
 	static constexpr uint32_t DISK_RENDER_US      = 100000;      // drawing rate while the disk runs
+	static constexpr uint32_t PAUSE_US            = 1000000;     // no step for this long: start afresh
 
 	FramePacer();
 
@@ -58,6 +59,7 @@ private:
 	bool     paced;        // the current step waits for its deadline
 	uint32_t deadline;     // when the next step is due
 	uint32_t lastRender;
+	uint32_t lastBegin;    // when Begin last ran, to notice a long pause
 	int      skipped;      // frames not drawn in a row
 };
 

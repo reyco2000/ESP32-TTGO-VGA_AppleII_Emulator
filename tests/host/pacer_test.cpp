@@ -141,6 +141,25 @@ static void TestSpeedChangeRestarts()
 	expect(p.End(late + 4000) == FramePacer::FRAME_US - 4000, "speed change: the schedule restarts from now");
 }
 
+static void TestLongPause()
+{
+	// the supervisor held the loop for 40 minutes: past half the 32-bit
+	// clock, where a stale deadline looks like it is still far ahead
+	const uint32_t gap = 40u * 60u * 1000000u;
+	FramePacer p;
+	Result r = Simulate(p, 0, 10, 4000);
+	FrameStep s = p.Begin(r.now + gap, false);
+	expect(s.render && s.frames == 1, "long pause: next step drawn");
+	uint32_t wait = p.End(r.now + gap + 4000);
+	expect(wait <= FramePacer::FRAME_US, "long pause: waits at most one frame, not half an hour");
+
+	// same with the disk running: drawing resumes straight away
+	FramePacer d;
+	Simulate(d, 0, 10, 10000, true);
+	FrameStep ds = d.Begin(100000u + gap, true);
+	expect(ds.render, "long pause, disk busy: next step drawn");
+}
+
 int main()
 {
 	TestLabels();
@@ -150,6 +169,7 @@ int main()
 	TestDiskBusy();
 	TestClockWrap();
 	TestSpeedChangeRestarts();
+	TestLongPause();
 
 	if (failures)
 	{

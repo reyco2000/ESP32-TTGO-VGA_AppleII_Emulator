@@ -20,9 +20,10 @@ constexpr int      FramePacer::MAX_FRAMES_PER_STEP;
 constexpr int      FramePacer::MAX_SKIP;
 constexpr uint32_t FramePacer::RESYNC_US;
 constexpr uint32_t FramePacer::DISK_RENDER_US;
+constexpr uint32_t FramePacer::PAUSE_US;
 
 FramePacer::FramePacer()
-	: speed(SPEED_1X), started(false), paced(false), deadline(0), lastRender(0), skipped(0)
+	: speed(SPEED_1X), started(false), paced(false), deadline(0), lastRender(0), lastBegin(0), skipped(0)
 {
 }
 
@@ -45,6 +46,12 @@ const char* FramePacer::Label(Speed s)
 FrameStep FramePacer::Begin(uint32_t now, bool diskBusy)
 {
 	FrameStep step;
+	// A long gap since the last step (the supervisor held the loop) makes the
+	// old deadline meaningless - past half the 32-bit clock it would even
+	// look far ahead - so start the schedule again. Unsigned: any gap counts.
+	if (started && (uint32_t)(now - lastBegin) > PAUSE_US)
+		started = false;
+	lastBegin = now;
 	if (!started)
 	{
 		started = true;
