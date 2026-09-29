@@ -113,11 +113,9 @@ void AppleVideo::LoadCharRom(const BYTE* rom)
 
 void AppleVideo::Reset()
 {
-	memset(LoResCache, 0, sizeof(LoResCache));
-	memset(TextCache, 0xFF, sizeof(TextCache));
-	memset(HiResCache, 0, sizeof(HiResCache));
-	memset(previousBit, 0, sizeof(previousBit));
-	flashCycle = 0;
+	// after a reset the screen still shows the old picture: every cell has
+	// to be drawn again, whatever memory now holds
+	InvalidateCells();
 }
 
 void AppleVideo::InvalidateCells()
@@ -237,9 +235,6 @@ void AppleVideo::Render(Memory& mem, const Apple2Device& dev, int frame, VGA* vg
 	// drawn last: the overlay sits on top of the emulated screen
 	if (dev.fpsOverlay)
 		RenderFpsOverlay(dev.fpsValue, FramePacer::Label((FramePacer::Speed)dev.speedMode));
-
-	if (++flashCycle == 30)
-		flashCycle = 0;
 }
 
 // The video circuit reads main and aux RAM directly, whatever RAMRD or the
@@ -297,7 +292,7 @@ void AppleVideo::RenderText(Memory& mem, const Apple2Device& dev, int page, int 
 
 			// only redraw a cell whose glyph or flash phase actually changed
 			int drawn = glyph | (inverse ? 0x100 : 0);
-			if (TextCache[line][c] != drawn || !flashCycle)
+			if (TextCache[line][c] != drawn)
 			{
 				TextCache[line][c] = drawn;
 				font.RenderFont(vga, glyph, SCREEN_X0 + c * cellW, SCREEN_Y0 + line * FONT_Y,
@@ -318,7 +313,7 @@ void AppleVideo::RenderLores(Memory& mem, int page, int lines)
 		for (int col = 0; col < SCREENTEXT_X; col++)
 		{
 			BYTE glyph = mem.ram[base + offsetGR[line] + col];
-			if (LoResCache[line][col] == glyph && flashCycle)
+			if (LoResCache[line][col] == glyph)
 				continue;
 			LoResCache[line][col] = glyph;
 
@@ -354,7 +349,7 @@ void AppleVideo::RenderDoubleHires(Memory& mem, int page, int lines)
 			              | ((uint32_t)(mainRow[col]     & 0x7F) << 7)
 			              | ((uint32_t)(auxRow[col + 1]  & 0x7F) << 14)
 			              | ((uint32_t)(mainRow[col + 1] & 0x7F) << 21);
-			if (HiResCache[line][col] == (int)dots && flashCycle)
+			if (HiResCache[line][col] == (int)dots)
 				continue;
 			HiResCache[line][col] = dots;
 
@@ -386,7 +381,7 @@ void AppleVideo::RenderHires(Memory& mem, int page, int lines)
 			WORD word = ((WORD)src[col + 1] << 8) | src[col];                         // the two bytes, in reverse order
 
 			// check if this group of dots needs a redraw
-			if (HiResCache[line][col] == word && flashCycle)
+			if (HiResCache[line][col] == word)
 				continue;
 
 			for (int bit = 0; bit < 16; bit++)                                        // store all bits 'word' into 'bits'
