@@ -23,6 +23,7 @@
 #include "../Tools/Log.h"
 #include "../Tools/Settings.h"
 #include "../VGA/VGA.h"
+#include "../BuildConfig.h"
 
 Apple2Machine::Apple2Machine(const MachineProfile& p)
 	: profile(p), bootNote("")
@@ -96,6 +97,10 @@ void Apple2Machine::LoadRoms()
 // supervisor shows the ROM as missing, so only the log says so here.
 void Apple2Machine::InstallSerialCard()
 {
+#if PERF_TRACE
+	// a measurement build needs the log, which the card would silence
+	return;
+#endif
 	int slot = Settings::LoadSerial(0);
 	if (!slot)
 		return;

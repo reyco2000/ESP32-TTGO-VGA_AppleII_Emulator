@@ -30,4 +30,13 @@
 // Size of ota_0 in the ESP32_Bootloader partition table (2816 KB).
 #define BOOTLOADER_OTA0_MAX_BYTES 0x2C0000
 
+// PERF_TRACE 1: a measurement build. 20 s after boot it mounts
+// /karateka.nib in drive 1, resets, and logs every Disk II motor change
+// and the time spent drawing, which tools/capture-log.py turns into a load
+// time. Build it with tools/build-dev.sh build/perf -DPERF_TRACE=1; never
+// commit it switched on.
+#ifndef PERF_TRACE
+#define PERF_TRACE 0
+#endif
+
 #endif

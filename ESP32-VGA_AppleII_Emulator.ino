@@ -28,6 +28,7 @@
 #include "src/Tools/Log.h"
 #include "src/Supervisor/Supervisor.h"
 #include "src/Tools/Bootloader.h"
+#include "src/BuildConfig.h"
 #include "src/Version.h"
 
 // Global pointer to keyboard for Apple2Device to read from
@@ -228,6 +229,38 @@ int fpscount = 0;
 unsigned long fpsMillis = 0;
 unsigned long heapCheckMillis = 0;
 
+#if PERF_TRACE
+// Measurement build (BuildConfig.h): mount Karateka 20 s after boot and log
+// each drive motor change, which tools/capture-log.py turns into a load time.
+static void PerfTrace()
+{
+    static bool mounted = false;
+    static bool lastMotor = false;
+    if (!mounted && millis() > 20000)
+    {
+        mounted = true;
+        // the card has held the image in either place
+        static const char* const paths[] = { "/karateka.nib", "/AppleII/karateka.nib" };
+        bool ok = false;
+        for (const char* path : paths)
+            if (!ok && SD.exists(path))
+                ok = machine->Mount(path, 0);
+        if (!ok)
+            listDir(SD, "/AppleII", 0);
+        Serial.printf("[perf] mount %s at %lu\n", ok ? "ok" : "FAILED", millis());
+        machine->Reset();
+    }
+    bool motor = machine->device.GetDiskMotorState();
+    if (motor != lastMotor)
+    {
+        lastMotor = motor;
+        Serial.printf("[perf] motor %s at %lu PC=%04X\n", motor ? "ON" : "off", millis(), machine->cpu.PC);
+    }
+}
+
+static uint32_t perfRenderUs = 0, perfRenderMax = 0, perfRenders = 0;
+#endif
+
 // One video frame: emulate (or run the supervisor), render, count FPS.
 // Runs in EmulationTask on core 0, see setup().
 static void RunFrame()
@@ -247,7 +280,18 @@ static void RunFrame()
             machine->device.supervisorRequested = false;
             supervisor->Open();
         }
+#if PERF_TRACE
+        PerfTrace();
+        uint32_t t0 = micros();
+#endif
         machine->Render(vga, frame);
+#if PERF_TRACE
+        uint32_t dt = micros() - t0;
+        perfRenderUs += dt;
+        perfRenders++;
+        if (dt > perfRenderMax)
+            perfRenderMax = dt;
+#endif
     }
     vga->show();
 
@@ -266,6 +310,12 @@ static void RunFrame()
     {
         fpsMillis = millis();
         LOGF("FPS : %d\n", fpscount);
+#if PERF_TRACE
+        if (perfRenders)
+            Serial.printf("[perf] render avg %u us max %u us\n",
+                          (unsigned)(perfRenderUs / perfRenders), (unsigned)perfRenderMax);
+        perfRenderUs = perfRenderMax = perfRenders = 0;
+#endif
         // feeds the F2 on-screen counter (drawn by Apple2Device::Render)
         machine->device.fpsValue = fpscount;
         fpscount = 0;
