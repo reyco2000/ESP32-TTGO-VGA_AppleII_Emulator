@@ -60,6 +60,7 @@ Apple2Device::Apple2Device()
 	// machine reset must not switch the user's FPS display off
 	fpsOverlay = false;
 	fpsValue = 0;
+	speedMode = FramePacer::SPEED_1X;
 	mouseMiddle = false;
 	iie = false;
 	sscSlot = 0;
@@ -492,6 +493,13 @@ void Apple2Device::UpdateKeyBoard()
         if (vk == fabgl::VK_F3)
         {
             joystick.Center();
+            continue;
+        }
+        if (vk == fabgl::VK_F4)
+        {
+            // emulation speed: 1X (a real Apple II) or MAX
+            speedMode = (speedMode + 1) % FramePacer::SPEED_COUNT;
+            InvalidateFpsOverlayRegion();
             continue;
         }
         if (vk == fabgl::VK_F12 && item.CTRL)

@@ -136,6 +136,28 @@ public:
 		return true;
 	}
 
+	// Emulation speed, a FramePacer::Speed: 0 = 1X, 1 = MAX.
+	static uint8_t LoadSpeed(uint8_t def)
+	{
+		Preferences p;
+		if (!p.begin(NS, true))
+			return def;
+		uint8_t s = p.getUChar("speed", def);
+		p.end();
+		return s > 1 ? def : s;
+	}
+
+	// false when NVS could not be written
+	static bool SaveSpeed(uint8_t s)
+	{
+		Preferences p;
+		if (!p.begin(NS, false))
+			return false;
+		bool ok = p.putUChar("speed", s) == 1;
+		p.end();
+		return ok;
+	}
+
 private:
 	static constexpr const char* NS = "apple2";
 	static const char* DiskKey(int drive) { return drive == 0 ? "d1" : "d2"; }

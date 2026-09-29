@@ -66,7 +66,7 @@ private:
 	void RenderLores(Memory& mem, int page, int lines);
 	void RenderHires(Memory& mem, int page, int lines);
 	void RenderDoubleHires(Memory& mem, int page, int lines);
-	void RenderFpsOverlay(int fps);
+	void RenderFpsOverlay(int fps, const char* speed);
 };
 
 #endif

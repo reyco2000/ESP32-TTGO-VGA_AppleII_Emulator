@@ -53,7 +53,8 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 - **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
 - **Runs standalone or under [ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader)**: flash it on its own over USB, or put it on the SD card as one entry in the bootloader's multi-emulator menu. Every release ships both builds (see [ESP32_Bootloader](#esp32_bootloader-sd-card-menu))
 - **Super Serial Card** in slot 1 or 2, wired to the board's USB serial port: a terminal, a printer, or both at once with a capture file on the SD card (see [Super Serial Card](#super-serial-card))
-- **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
+- **FPS overlay (F2)**: toggles a counter in the top right corner of the screen showing the frames drawn per second and the current speed (`60FPS 1X`)
+- **Real Apple II speed**: the machine runs at a real Apple II's 60.05 frames a second, every frame drawn; **F4** switches to MAX (as fast as the ESP32 can go) and back. Disk loads run flat out either way. The choice is kept across power cycles
 - Boots to BASIC with no disk mounted; the Disk II boot PROM is only visible to the machine while a disk is mounted, so `PR#6` and the boot-time slot scan always behave
 
 ## Hardware Requirements
@@ -219,6 +220,7 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 | **F1** | supervisor menu |
 | **F2** | FPS counter on / off |
 | **F3** | centre the joystick |
+| **F4** | emulation speed: 1X (real Apple II) or MAX |
 | **Ctrl+F12** | Ctrl-Reset: a warm reset, memory kept |
 | **Ctrl+Left Alt+F12** | //e: Open-Apple-Ctrl-Reset, a cold boot |
 | **Ctrl+Left Alt+Right Alt+F12** | //e: the built-in self-test, which ends with "System OK" |
@@ -309,9 +311,9 @@ If you're planning to dig in, start with [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ## TODO
 
-- [ ] Improve FPS
+- [x] Improve FPS
 - [ ] Test keyboard bouncing — check the PS/2 input path for repeated or dropped keystrokes and debounce if needed
-- [ ] CPU speed control — the main loop runs a fixed `17050 * 4` cycles per frame; make this selectable so the machine can run at 1 MHz or faster
+- [x] CPU speed control — F4 switches 1X / MAX, saved across power cycles
 - [x] 80 column support
 - [x] Apple IIe support — IIe ROM, auxiliary memory bank, and the extra soft switches
 - [ ] Double hi-res — the renderer is written but not yet verified on screen

@@ -2881,7 +2881,7 @@ Fill in after each measured task (MAX speed for PERF rows).
 | After task | Idle FPS | speed % (idle) | Karateka load ms | Motor-on ms | render avg / max µs | Internal free / largest block |
 |---|---|---|---|---|---|---|
 | 0 (baseline, unpaced) | 34 (68,200 cyc/pass ≈ 227%) | n/a | 22,623 (90 motor events) | 17,331 | idle 522 / 6,300; Karateka 4,186 / 18,672 | 84,252 / 63,476 (PERF build, no SSC) |
-| 2 (paced; PERF = MAX) | | | | | | |
+| 2 (paced; PERF = MAX) | 34 (1X: 61) | 221 (1X: 100) | 22,601 (1X: 22,667) | 17,443 (1X: 19,372) | Karateka 4,194 / 18,667 | 84,228 / 63,476 |
 | 3 | | | | | | |
 | 4 | | | | | | |
 | 5 | | | | | | |

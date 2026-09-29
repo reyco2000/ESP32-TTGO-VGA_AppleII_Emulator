@@ -21,6 +21,7 @@
 #include "AppleMem.h"
 #include "Apple2Device.h"
 #include "../VGA/VGA.h"
+#include "FramePacer.h"
 
 // The Apple screen, 280x192 dots at double width, centred on the framebuffer.
 // X0 is even, so every 40-column dot is one whole framebuffer byte.
@@ -140,12 +141,12 @@ void AppleVideo::InvalidateRenderCache()
 	HIRES : 280×192 (MIX 280×160)
 	In MIX mode the bottom is TEXT ( 4 Line : 32 pixel )
 */
-// F2 FPS overlay: 7 text cells in the top right corner ("999 FPS").
+// F2 overlay: 9 text cells in the top right corner ("999FPS 1X").
 // FPS_COL is where the glyphs go; hires caches at a 2-byte (14 dot)
 // granularity, so the invalidated span starts one byte column earlier.
-#define FPS_COL			33
-#define FPS_LEN			7
-#define FPS_HIRES_COL	32
+#define FPS_COL			31
+#define FPS_LEN			9
+#define FPS_HIRES_COL	30
 
 void AppleVideo::InvalidateFpsOverlayRegion()
 {
@@ -167,12 +168,12 @@ void AppleVideo::InvalidateFpsOverlayRegion()
 		TextCache[0][col] = -1;
 }
 
-void AppleVideo::RenderFpsOverlay(int fps)
+void AppleVideo::RenderFpsOverlay(int fps, const char* speed)
 {
 	char text[FPS_LEN + 1];
 	if (fps < 0)   fps = 0;
 	if (fps > 999) fps = 999;
-	snprintf(text, sizeof(text), "%3d FPS", fps);
+	snprintf(text, sizeof(text), "%3dFPS %s", fps, speed);
 
 	// RenderFont paints the whole cell, so the black background still
 	// covers whatever the emulator drew underneath
@@ -235,7 +236,7 @@ void AppleVideo::Render(Memory& mem, const Apple2Device& dev, int frame, VGA* vg
 
 	// drawn last: the overlay sits on top of the emulated screen
 	if (dev.fpsOverlay)
-		RenderFpsOverlay(dev.fpsValue);
+		RenderFpsOverlay(dev.fpsValue, FramePacer::Label((FramePacer::Speed)dev.speedMode));
 
 	if (++flashCycle == 30)
 		flashCycle = 0;
