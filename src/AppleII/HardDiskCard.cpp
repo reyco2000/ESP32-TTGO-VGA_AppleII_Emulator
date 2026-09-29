@@ -14,7 +14,7 @@
 #include "HardDiskCard.h"
 #include "DskImage.h"
 
-static const int DRIVER = 0x30;      // driver entry, $Cn30
+static const int DRIVER = 0x40;      // driver entry, $Cn40
 
 HardDiskCard::HardDiskCard()
 	: slot(7), bus(NULL), dataOffset(0), blocks(0), readOnly(false), result(ERR_NONE)
@@ -35,8 +35,12 @@ void HardDiskCard::Configure(int s, CardBus* b)
 //          the ID bytes the autostart ROM ($Cn01/03/05) and ProDOS ($Cn07,
 //          not $00: a plain block device, not SmartPort) look for
 //   $Cn08  boot: READ block 0 of unit $n0 to $0800, then JMP $0801 with X =
-//          $n0 as boot code expects; on an error JMP $E000 (BASIC)
-//   $Cn30  driver: STA $C080+n0 runs the command; A = error code, X/Y =
+//          $n0 as boot code expects. A read error or a blank boot block
+//          (first byte $00: an image not yet formatted) goes back to the
+//          autostart ROM's slot scan at $FABA - both the ][+ and the //e
+//          ROMs have it there - so the Disk II still boots; if the scan did
+//          not bring us here ($01 is not $Cn), to BASIC instead
+//   $Cn40  driver: STA $C080+n0 runs the command; A = error code, X/Y =
 //          block count (for STATUS); CMP #1 sets carry on an error
 //   $CnFC  block count, $CnFE status byte, $CnFF driver entry
 void HardDiskCard::BuildRom()
@@ -52,10 +56,16 @@ void HardDiskCard::BuildRom()
 		0xA9, 0x00, 0x85, 0x44, 0x85, 0x46, 0x85, 0x47,   // $10 buffer lo, block 0
 		0xA9, 0x08, 0x85, 0x45,                           // $18 buffer $0800
 		0x20, DRIVER, cn,                                 // $1C JSR driver
-		0xB0, 0x05,                                       // $1F BCS fail
-		0xA2, s16,                                        // $21 LDX #$n0
-		0x4C, 0x01, 0x08,                                 // $23 JMP $0801
-		0x4C, 0x00, 0xE0,                                 // $26 fail: JMP $E000
+		0xB0, 0x0A,                                       // $1F BCS fail
+		0xAD, 0x00, 0x08,                                 // $21 LDA $0800
+		0xF0, 0x05,                                       // $24 BEQ fail   nothing to boot
+		0xA2, s16,                                        // $26 LDX #$n0
+		0x4C, 0x01, 0x08,                                 // $28 JMP $0801
+		0xA5, 0x01,                                       // $2B fail: LDA $01
+		0xC9, cn,                                         // $2D CMP #$Cn   from the slot scan?
+		0xD0, 0x03,                                       // $2F BNE basic
+		0x4C, 0xBA, 0xFA,                                 // $31 JMP $FABA  scan the next slot
+		0x4C, 0x00, 0xE0,                                 // $34 basic: JMP $E000
 	};
 	const BYTE driver[] =
 	{

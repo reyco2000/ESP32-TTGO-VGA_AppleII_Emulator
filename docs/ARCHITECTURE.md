@@ -131,9 +131,9 @@ firmware, built for the slot it is in:
 | Address | Contents |
 |---|---|
 | `$Cn01/03/05/07` | ID bytes `$20/$00/$03/$3C`: bootable, a block device, not SmartPort |
-| `$Cn08` | boot: READ block 0 of unit `$n0` to `$0800`, `JMP $0801` with X = `$n0`; `JMP $E000` on error |
-| `$Cn30` | driver: `STA $C0x0` runs the command, then A = error code (register 1), X/Y = block count (registers 2/3), `CMP #1` sets carry on an error |
-| `$CnFC-FD` / `$CnFE` / `$CnFF` | block count / status `$07` / driver entry `$30` |
+| `$Cn08` | boot: READ block 0 of unit `$n0` to `$0800`, `JMP $0801` with X = `$n0`. On a read error or a blank boot block (`$0800` = `$00`), back to the autostart slot scan at `$FABA` (same address in the ][+ and //e ROMs) so the floppy boots, or `JMP $E000` if the scan did not bring us here |
+| `$Cn40` | driver: `STA $C0x0` runs the command, then A = error code (register 1), X/Y = block count (registers 2/3), `CMP #1` sets carry on an error |
+| `$CnFC-FD` / `$CnFE` / `$CnFF` | block count / status `$07` / driver entry `$40` |
 
 The driver's write to register 0 makes the card read ProDOS's command block in
 zero page (`$42` command, `$43` unit, `$44-45` buffer, `$46-47` block) through

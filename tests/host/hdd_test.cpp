@@ -92,11 +92,25 @@ static void TestFirmware()
 		return;
 	expect(rom[1] == 0x20 && rom[3] == 0x00 && rom[5] == 0x03, "autostart boot ID bytes");
 	expect(rom[7] == 0x3C, "a block device, not SmartPort");
-	expect(rom[0xFF] == 0x30, "driver entry at $Cn30");
+	expect(rom[0xFF] == 0x40, "driver entry at $Cn40");
 	expect(rom[0xFE] == 0x07, "status byte: read, write, status; one volume");
 	expect(rom[0xFC] == (BLOCKS & 0xFF) && rom[0xFD] == (BLOCKS >> 8), "block count");
-	expect(rom[0x30] == 0x8D && rom[0x31] == 0xF0 && rom[0x32] == 0xC0, "driver: STA $C0F0 for slot 7");
-	expect(rom[0x0D] == 0x70 && rom[0x22] == 0x70, "boot: unit and X are slot 7 * 16");
+	expect(rom[0x40] == 0x8D && rom[0x41] == 0xF0 && rom[0x42] == 0xC0, "driver: STA $C0F0 for slot 7");
+	expect(rom[0x1C] == 0x20 && rom[0x1D] == 0x40 && rom[0x1E] == 0xC7, "boot: JSR $C740");
+	expect(rom[0x0D] == 0x70 && rom[0x27] == 0x70, "boot: unit and X are slot 7 * 16");
+
+	// a blank image (block 0 starting $00) or a read error must not hang the
+	// boot: back to the autostart ROM's slot scan, so the Disk II still boots
+	const int fail = 0x2B;
+	expect(rom[0x1F] == 0xB0 && 0x21 + rom[0x20] == fail, "boot: BCS to fail on a read error");
+	expect(rom[0x21] == 0xAD && rom[0x22] == 0x00 && rom[0x23] == 0x08, "boot: LDA $0800");
+	expect(rom[0x24] == 0xF0 && 0x26 + rom[0x25] == fail, "boot: BEQ to fail on an empty boot block");
+	expect(rom[0x28] == 0x4C && rom[0x29] == 0x01 && rom[0x2A] == 0x08, "boot: JMP $0801");
+	expect(rom[fail] == 0xA5 && rom[fail + 1] == 0x01 && rom[fail + 2] == 0xC9 && rom[fail + 3] == 0xC7,
+	       "fail: came from the slot scan ($01 = $C7)?");
+	expect(rom[fail + 4] == 0xD0 && fail + 6 + rom[fail + 5] == 0x34, "fail: BNE to BASIC otherwise");
+	expect(rom[fail + 6] == 0x4C && rom[fail + 7] == 0xBA && rom[fail + 8] == 0xFA, "fail: JMP $FABA, the scan's next slot");
+	expect(rom[0x34] == 0x4C && rom[0x35] == 0x00 && rom[0x36] == 0xE0, "BASIC: JMP $E000");
 	card.Unmount();
 	expect(card.SlotRom() == NULL && !card.HasImage(), "unmounted: firmware gone");
 }
