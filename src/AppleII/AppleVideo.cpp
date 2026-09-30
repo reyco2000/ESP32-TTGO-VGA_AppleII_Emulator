@@ -163,9 +163,13 @@ void AppleVideo::RenderFpsOverlay(int fps, const char* speed)
 	snprintf(text, sizeof(text), "%3dFPS %s", fps, speed);
 
 	// RenderFont paints the whole cell, so the black background still
-	// covers whatever the emulator drew underneath
+	// covers whatever the emulator drew underneath. The //e character ROM
+	// is indexed by screen code, where plain ASCII is inverse video or
+	// MouseText: its normal glyphs are the codes with bit 7 set. The ][+
+	// font is indexed by ASCII.
+	BYTE normal = charRom ? 0x80 : 0x00;
 	for (int i = 0; i < FPS_LEN; i++)
-		font.RenderFont(vga, (BYTE)text[i], SCREEN_X0 + (FPS_COL + i) * CELL_W, SCREEN_Y0,
+		font.RenderFont(vga, (BYTE)text[i] | normal, SCREEN_X0 + (FPS_COL + i) * CELL_W, SCREEN_Y0,
 		                false, A2_GREEN, A2_BLACK);
 }
 

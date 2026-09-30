@@ -2,6 +2,10 @@
 
 An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images, plus `.hdv` / `.2mg` ProDOS hard disks, are loaded from an SD card — no host computer involved.
 
+## What's new in 0.9.1
+
+- **F2 counter readable on the //e.** On the //e the counter's letters showed up as MouseText symbols and solid blocks; it now reads `60FPS 1X` as on the ][+.
+
 ## What's new in 0.9.0
 
 - **Real Apple II speed.** The machine now runs at a real Apple II's 60.05 frames a second, and every frame is drawn (it used to run about 2.3× too fast and draw one frame in four). **F4** switches to **MAX**, as fast as the ESP32 can go, and back; the choice is kept across power cycles. Disk loads run flat out at either speed. The **F2** counter shows frames drawn and the speed, e.g. `60FPS 1X`.
@@ -83,12 +87,12 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 
 If you just want to run the emulator without building from source, grab the pre-built firmware and use the browser-based flasher — no toolchain, no drivers to install beyond your board's USB-serial driver.
 
-1. Download `ESP32-AppleII-v0.9.0.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
+1. Download `ESP32-AppleII-v0.9.1.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
 2. Connect your TTGO VGA32 board via USB
 3. Open [ESP Web Tool](https://espressif.github.io/esptool-js/) in a Chrome or Edge browser
 4. Click **Connect** and select the board's serial port
 5. Set the flash offset to `0x0000`
-6. Choose the downloaded `ESP32-AppleII-v0.9.0.bin`
+6. Choose the downloaded `ESP32-AppleII-v0.9.1.bin`
 7. Click **Program** and wait for the flash to complete
 
 Hold the **BOOT** button on the board while clicking **Connect** if the browser cannot reach the device.
@@ -103,7 +107,7 @@ Same binary, if you'd rather not use a browser:
 
 ```bash
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-AppleII-v0.9.0.bin
+  write_flash 0x0 ESP32-AppleII-v0.9.1.bin
 ```
 
 Depending on the board's USB-serial chip the port may enumerate as `/dev/ttyACM0` instead of `/dev/ttyUSB0`.
@@ -116,7 +120,7 @@ Each release carries two builds. Use the one that matches how you run the board:
 
 | You want | Release files | Install |
 |---|---|---|
-| Only this emulator, flashed over USB | `ESP32-AppleII-v0.9.0.bin` | at offset `0x0`, as above |
+| Only this emulator, flashed over USB | `ESP32-AppleII-v0.9.1.bin` | at offset `0x0`, as above |
 | This emulator in the ESP32_Bootloader menu | `firmware.bin` + `version.txt` | on the SD card, as below |
 
 The two are not interchangeable: `firmware.bin` is built to hand the board back to the bootloader, and the standalone image is not.
@@ -143,7 +147,7 @@ If `firmware.bin` and `version.txt` sit in the card root instead of a folder, th
 
 - **Power cycle** to get back to the bootloader menu, and pick another emulator from there.
 - **MACHINE** switches between the ][+ and the //e and restarts straight into the emulator, not the menu.
-- **ABOUT** shows `0.9.0 (SD BOOTLOADER)` in this build, so you can tell which one is running.
+- **ABOUT** shows `0.9.1 (SD BOOTLOADER)` in this build, so you can tell which one is running.
 - **Updating:** replace both files in `AppleII/` with the ones from the new release. The bootloader reflashes only when `version.txt` changes, so always copy both.
 - **Settings** (machine, keyboard layout) are kept in the board's NVS, which the bootloader shares, so they carry over between sessions. They are lost if the whole flash is erased.
 
@@ -175,7 +179,7 @@ tools/package-bootloader.sh      # output in build/sdcard/AppleII/
 
 It is the same source compiled with `-DBUILD_TARGET=1` (see [`src/BuildConfig.h`](src/BuildConfig.h)). The standalone build stays the default.
 
-The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.9.0.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
+The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.9.1.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
 
 The CPU cores have host-side tests that run on the build machine rather than the ESP32 (they need `g++` and `curl`, and download the test images on first run):
 
