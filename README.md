@@ -1,6 +1,15 @@
 # ESP32-VGA Apple II Emulator
 
-An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images are loaded from an SD card — no host computer involved.
+An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images, plus `.hdv` / `.2mg` ProDOS hard disks, are loaded from an SD card — no host computer involved.
+
+## What's new since 0.8.0
+
+- **Real Apple II speed.** The machine now runs at a real Apple II's 60.05 frames a second, and every frame is drawn (it used to run about 2.3× too fast and draw one frame in four). **F4** switches to **MAX**, as fast as the ESP32 can go, and back; the choice is kept across power cycles. Disk loads run flat out at either speed. The **F2** counter shows frames drawn and the speed, e.g. `60FPS 1X`.
+- **Faster everywhere.** At MAX the CPU is about 18% faster (a 32-bit cycle counter instead of 64-bit) and *Karateka* loads in about 19 s instead of 22.6 s. Hires screens draw through a lookup table, about twice as fast, and the old full-screen repaint every half second is gone.
+- **Disks keep what you save.** What programs write to a `.dsk`, `.do`, `.po` or `.nib` is now written back to the image on the SD card when the drive stops or the disk is ejected — keep copies of images you care about. If the card refuses the write, the drive turns write-protected so DOS says so.
+- **ProDOS hard disks.** `.hdv`, ProDOS-order `.2mg` and `.po` images bigger than 140K (up to 32 MB) mount in slot 7 from the F1 menu — pick the image and it mounts straight away; pick it again to eject it. A mounted hard disk boots before the floppies; a blank one (not yet formatted) lets the floppy boot instead, so you can format it from a ProDOS disk.
+- **The drive motor behaves like the real card:** Ctrl-Reset stops it, and `$CFFF` no longer does (it now only releases the expansion ROMs, which the Super Serial Card relies on).
+- **Measuring speed:** `tools/build-dev.sh`, `tools/flash-parts.sh` and `tools/capture-log.py` build, flash (keeping settings) and time the emulator — see [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md#measuring-speed).
 
 ## What's new in 0.8.0
 
@@ -323,4 +332,7 @@ If you're planning to dig in, start with [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 - [x] Apple IIe support — IIe ROM, auxiliary memory bank, and the extra soft switches
 - [ ] Double hi-res — the renderer is written but not yet verified on screen
 - [x] Keyboard layouts other than US, selectable from the F1 menu — Latin American and Brazilian ABNT2
+- [x] ProDOS hard disk images (`.hdv`, `.2mg`) in slot 7
+- [x] Save disk writes back to the SD card
+- [ ] WOZ disk images — bit-level disk emulation for copy-protected originals
 - [ ] Apple IIc and IIc Plus — the machine-profile and slot-card structure is meant to take them as new profiles
