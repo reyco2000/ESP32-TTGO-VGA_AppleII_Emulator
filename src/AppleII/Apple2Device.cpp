@@ -60,6 +60,7 @@ Apple2Device::Apple2Device()
 	// machine reset must not switch the user's FPS display off
 	fpsOverlay = false;
 	fpsValue = 0;
+	speedMode = FramePacer::SPEED_1X;
 	mouseMiddle = false;
 	iie = false;
 	sscSlot = 0;
@@ -242,12 +243,6 @@ BYTE Apple2Device::SoftSwitch(Memory *mem, WORD address, BYTE value, bool WRT)
 		case 0xC078: case 0xC079: case 0xC07A: case 0xC07B:
 		case 0xC07C: case 0xC07D:
 			joystick.Trigger(cpu->CurrentTick());
-			break;
-
-		// $CFFF stops the drive motor, as the original emulator did (on real
-		// hardware it releases the slots' $C800 expansion ROMs)
-		case 0xCFFF:
-			disk6.MotorOff();
 			break;
 
 		// Pushbuttons 0 and 1: on the IIe these are the Open Apple and
@@ -492,6 +487,13 @@ void Apple2Device::UpdateKeyBoard()
         if (vk == fabgl::VK_F3)
         {
             joystick.Center();
+            continue;
+        }
+        if (vk == fabgl::VK_F4)
+        {
+            // emulation speed: 1X (a real Apple II) or MAX
+            speedMode = (speedMode + 1) % FramePacer::SPEED_COUNT;
+            InvalidateFpsOverlayRegion();
             continue;
         }
         if (vk == fabgl::VK_F12 && item.CTRL)

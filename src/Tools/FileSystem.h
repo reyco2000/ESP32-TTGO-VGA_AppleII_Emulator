@@ -69,4 +69,20 @@ public :
 
         return readlen;
     }
+
+    // Overwrites len bytes at offset in an existing file without truncating
+    // it. False when the file cannot be opened for update (missing, card
+    // read-only or gone) or not every byte was written.
+    static bool WriteAt(const char *path, size_t offset, const uint8_t *data, size_t len)
+    {
+        File file = SD.open(path, "r+");
+        if (!file)
+        {
+            LOGF("- failed to open file for update: %s\n", path);
+            return false;
+        }
+        bool ok = file.seek(offset) && file.write(data, len) == len;
+        file.close();
+        return ok;
+    }
 };

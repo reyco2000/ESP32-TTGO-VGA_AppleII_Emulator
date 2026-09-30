@@ -11,7 +11,9 @@
  *           INIT lays it out: sync gap, then per sector an address
  *           field (D5 AA 96, 4-and-4 volume/track/sector/checksum,
  *           DE AA EB), a short gap, and a data field (D5 AA AD,
- *           342+1 6-and-2 nibbles, DE AA EB).
+ *           342+1 6-and-2 nibbles, DE AA EB). Also reads tracks
+ *           back into sectors, for writing a changed disk back to
+ *           its image.
  * ============================================================
 */
 
@@ -52,6 +54,10 @@ ImageType TypeFromPath(const char* path)
 		return IMAGE_DOS;
 	if (EndsWith(path, ".po"))
 		return IMAGE_PRODOS;
+	if (EndsWith(path, ".hdv"))
+		return IMAGE_HDV;
+	if (EndsWith(path, ".2mg"))
+		return IMAGE_2MG;
 	return IMAGE_NONE;
 }
 
@@ -134,6 +140,92 @@ void NibblizeInPlace(uint8_t* buf, SectorOrder order)
 		memcpy(scratch, image + t * TRACK_BYTES, TRACK_BYTES);
 		NibblizeTrack(scratch, t, order, buf + t * NIB_TRACK);
 	}
+}
+
+// disk nibble -> 6-bit value, 0xFF for a byte that is not a disk nibble
+static uint8_t readTable[256];
+static bool readTableBuilt = false;
+
+static void BuildReadTable()
+{
+	if (readTableBuilt)
+		return;
+	memset(readTable, 0xFF, sizeof(readTable));
+	for (int i = 0; i < 64; i++)
+		readTable[WRITE_TABLE[i]] = i;
+	readTableBuilt = true;
+}
+
+// A track read as a ring, from pos on
+struct TrackReader
+{
+	const uint8_t* nib;
+	int pos;
+	uint8_t Next() { uint8_t v = nib[pos]; pos = (pos + 1) % NIB_TRACK; return v; }
+	uint8_t Get44() { uint8_t a = Next(); uint8_t b = Next(); return ((a << 1) | 1) & b; }
+	bool At(uint8_t a, uint8_t b, uint8_t c) const
+	{
+		return nib[pos] == a && nib[(pos + 1) % NIB_TRACK] == b && nib[(pos + 2) % NIB_TRACK] == c;
+	}
+};
+
+int DenibblizeTrack(const uint8_t* nib, int track, uint8_t sectors[SECTORS][SECTOR_BYTES])
+{
+	BuildReadTable();
+	int found = 0;
+	for (int start = 0; start < NIB_TRACK; start++)
+	{
+		TrackReader r = { nib, start };
+		if (!r.At(0xD5, 0xAA, 0x96))
+			continue;
+		r.Next(); r.Next(); r.Next();
+		uint8_t vol = r.Get44(), trk = r.Get44(), sec = r.Get44(), sum = r.Get44();
+		if ((vol ^ trk ^ sec) != sum || trk != track || sec >= SECTORS)
+			continue;
+
+		// the data field follows within a few dozen nibbles
+		int n = 0;
+		while (n < 64 && !r.At(0xD5, 0xAA, 0xAD))
+		{
+			r.Next();
+			n++;
+		}
+		if (n == 64)
+			continue;
+		r.Next(); r.Next(); r.Next();
+
+		uint8_t six[342];
+		uint8_t prev = 0;
+		bool bad = false;
+		for (int i = 0; i < 342; i++)
+		{
+			uint8_t v = readTable[r.Next()];
+			if (v == 0xFF) { bad = true; break; }
+			prev ^= v;
+			six[i] = prev;
+		}
+		if (bad || (readTable[r.Next()] ^ prev) != 0)
+			continue;
+
+		for (int i = 0; i < SECTOR_BYTES; i++)
+		{
+			int aux = six[i % 86] >> (2 * (i / 86));
+			sectors[sec][i] = (six[86 + i] << 2) | ((aux & 1) << 1) | ((aux >> 1) & 1);
+		}
+		found |= 1 << sec;
+	}
+	return found;
+}
+
+bool DenibblizeTrackToImage(const uint8_t* nib, int track, SectorOrder order, uint8_t* out)
+{
+	// static: 4K is too much for the emulation task's 8K stack
+	static uint8_t sectors[SECTORS][SECTOR_BYTES];
+	if (DenibblizeTrack(nib, track, sectors) != 0xFFFF)
+		return false;
+	for (int p = 0; p < SECTORS; p++)
+		memcpy(out + LogicalSector(p, order) * SECTOR_BYTES, sectors[p], SECTOR_BYTES);
+	return true;
 }
 
 }

@@ -1,6 +1,15 @@
 # ESP32-VGA Apple II Emulator
 
-An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images are loaded from an SD card — no host computer involved.
+An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images, plus `.hdv` / `.2mg` ProDOS hard disks, are loaded from an SD card — no host computer involved.
+
+## What's new since 0.8.0
+
+- **Real Apple II speed.** The machine now runs at a real Apple II's 60.05 frames a second, and every frame is drawn (it used to run about 2.3× too fast and draw one frame in four). **F4** switches to **MAX**, as fast as the ESP32 can go, and back; the choice is kept across power cycles. Disk loads run flat out at either speed. The **F2** counter shows frames drawn and the speed, e.g. `60FPS 1X`.
+- **Faster everywhere.** At MAX the CPU is about 18% faster (a 32-bit cycle counter instead of 64-bit) and *Karateka* loads in about 19 s instead of 22.6 s. Hires screens draw through a lookup table, about twice as fast, and the old full-screen repaint every half second is gone.
+- **Disks keep what you save.** What programs write to a `.dsk`, `.do`, `.po` or `.nib` is now written back to the image on the SD card when the drive stops or the disk is ejected — keep copies of images you care about. If the card refuses the write, the drive turns write-protected so DOS says so.
+- **ProDOS hard disks.** `.hdv`, ProDOS-order `.2mg` and `.po` images bigger than 140K (up to 32 MB) mount in slot 7 from the F1 menu — pick the image and it mounts straight away; pick it again to eject it. A mounted hard disk boots before the floppies; a blank one (not yet formatted) lets the floppy boot instead, so you can format it from a ProDOS disk.
+- **The drive motor behaves like the real card:** Ctrl-Reset stops it, and `$CFFF` no longer does (it now only releases the expansion ROMs, which the Super Serial Card relies on).
+- **Measuring speed:** `tools/build-dev.sh`, `tools/flash-parts.sh` and `tools/capture-log.py` build, flash (keeping settings) and time the emulator — see [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md#measuring-speed).
 
 ## What's new in 0.8.0
 
@@ -48,12 +57,14 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
   - **Apple //e (enhanced)** — 65C02, 128K with the auxiliary 64K, 80-column text, lowercase and MouseText. Needs its ROM files on the SD card (see [ROM files](#rom-files)).
 - 6502 and 65C02 CPU cores checked against Klaus Dormann's functional test suites, run on the build machine (`tests/host/run-cpu-tests.sh`)
 - Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not yet verified — see TODO)
-- **Two emulated Disk II drives** that take 140K sector images (`.dsk` / `.do` in DOS 3.3 order, `.po` in ProDOS order) and nibblized `.nib` images
+- **Two emulated Disk II drives** that take 140K sector images (`.dsk` / `.do` in DOS 3.3 order, `.po` in ProDOS order) and nibblized `.nib` images. What programs write to a disk is saved back to its image on the SD card when the drive stops or the disk is ejected — keep copies of images you care about
+- **ProDOS hard disks** (`.hdv`, ProDOS-order `.2mg`, and `.po` images bigger than 140K, up to 32 MB) in slot 7, read and written a block at a time straight from the SD card. A mounted hard disk boots before the floppies
 - **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount disk images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with **MACHINE**, pick the keyboard layout with **KEYBOARD**, put a Super Serial Card in a slot with **SERIAL**, or open **ABOUT** for the firmware version and credits. The arrow keys move between the buttons and the file list. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
 - **Runs standalone or under [ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader)**: flash it on its own over USB, or put it on the SD card as one entry in the bootloader's multi-emulator menu. Every release ships both builds (see [ESP32_Bootloader](#esp32_bootloader-sd-card-menu))
 - **Super Serial Card** in slot 1 or 2, wired to the board's USB serial port: a terminal, a printer, or both at once with a capture file on the SD card (see [Super Serial Card](#super-serial-card))
-- **FPS overlay (F2)**: toggles a live frames-per-second counter in the top right corner of the screen
+- **FPS overlay (F2)**: toggles a counter in the top right corner of the screen showing the frames drawn per second and the current speed (`60FPS 1X`)
+- **Real Apple II speed**: the machine runs at a real Apple II's 60.05 frames a second, every frame drawn; **F4** switches to MAX (as fast as the ESP32 can go) and back. Disk loads run flat out either way. The choice is kept across power cycles
 - Boots to BASIC with no disk mounted; the Disk II boot PROM is only visible to the machine while a disk is mounted, so `PR#6` and the boot-time slot scan always behave
 
 ## Hardware Requirements
@@ -171,6 +182,10 @@ The CPU cores have host-side tests that run on the build machine rather than the
 ```bash
 tests/host/run-cpu-tests.sh      # Klaus Dormann's 6502 and 65C02 suites, both must PASS
 tests/host/run-dsk-tests.sh      # .dsk/.po nibblizer, round-tripped through an RWTS-style decoder
+tests/host/run-disk-tests.sh     # Disk II write-back to .dsk/.po/.nib, reset stopping the motor
+tests/host/run-hdd-tests.sh      # hard disk card: firmware bytes, ProDOS block commands, .2mg headers
+tests/host/run-pacer-tests.sh    # frame pacing: 1X real time, MAX, fast disk, frame skipping
+tests/host/run-hires-tests.sh    # hires lookup table against the old per-dot renderer, every cell
 ```
 
 ## SD Card Setup
@@ -207,7 +222,7 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 ## Usage
 
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
-- Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (then `1`/`2` picks the drive), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
+- Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (then `1`/`2` picks the drive; a hard disk image mounts in slot 7 straight away, and picking the mounted one again ejects it), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
 - **MACHINE** switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
 - **SERIAL** installs or removes the Super Serial Card, and turns the SD card capture file on and off (see [Super Serial Card](#super-serial-card)).
 - **KEYBOARD** picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
@@ -219,6 +234,7 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 | **F1** | supervisor menu |
 | **F2** | FPS counter on / off |
 | **F3** | centre the joystick |
+| **F4** | emulation speed: 1X (real Apple II) or MAX |
 | **Ctrl+F12** | Ctrl-Reset: a warm reset, memory kept |
 | **Ctrl+Left Alt+F12** | //e: Open-Apple-Ctrl-Reset, a cold boot |
 | **Ctrl+Left Alt+Right Alt+F12** | //e: the built-in self-test, which ends with "System OK" |
@@ -309,11 +325,14 @@ If you're planning to dig in, start with [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 
 ## TODO
 
-- [ ] Improve FPS
+- [x] Improve FPS
 - [ ] Test keyboard bouncing — check the PS/2 input path for repeated or dropped keystrokes and debounce if needed
-- [ ] CPU speed control — the main loop runs a fixed `17050 * 4` cycles per frame; make this selectable so the machine can run at 1 MHz or faster
+- [x] CPU speed control — F4 switches 1X / MAX, saved across power cycles
 - [x] 80 column support
 - [x] Apple IIe support — IIe ROM, auxiliary memory bank, and the extra soft switches
 - [ ] Double hi-res — the renderer is written but not yet verified on screen
 - [x] Keyboard layouts other than US, selectable from the F1 menu — Latin American and Brazilian ABNT2
+- [x] ProDOS hard disk images (`.hdv`, `.2mg`) in slot 7
+- [x] Save disk writes back to the SD card
+- [ ] WOZ disk images — bit-level disk emulation for copy-protected originals
 - [ ] Apple IIc and IIc Plus — the machine-profile and slot-card structure is meant to take them as new profiles

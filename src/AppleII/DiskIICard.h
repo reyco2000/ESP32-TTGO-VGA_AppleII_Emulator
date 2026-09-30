@@ -34,6 +34,8 @@ struct FloppyDrive
 	bool writeMode;
 	BYTE track;
 	WORD nibble;
+	DskImage::ImageType type;   // how 'data' maps back to the file
+	uint64_t dirtyTracks;       // bit t: track t written since the last Flush
 
 	FloppyDrive()
 	{
@@ -50,6 +52,8 @@ struct FloppyDrive
 		writeMode = false;
 		track = 0;
 	 	nibble = 0;
+		type = DskImage::IMAGE_NONE;
+		dirtyTracks = 0;
 	}
 };
 
@@ -63,14 +67,19 @@ public:
 	BYTE Io(int reg, BYTE value, bool write) override;
 	BYTE* SlotRom() override;
 	void Reset() override;
+	// The RESET line (Ctrl-Reset too): clears the card's control latch, so
+	// both motors stop and the drive leaves write mode. The head stays put.
+	void ResetLine();
 
 	bool Mount(const char* path, int drive);
 	void Unmount(int drive);
+	// Writes the tracks changed since the last flush back to the image file.
+	// Called when the motor stops, the drive is deselected, and on eject.
+	void Flush(int drive);
 	void EjectAll();
 	bool HasFloppy(int drive) { return disk[drive].filename[0] != '\0'; }
 	std::string GetDiskName(int drive) { return disk[drive].filename; }
 	bool MotorOn() { return disk[currentDrive].motorOn; }
-	void MotorOff() { disk[currentDrive].motorOn = false; }
 
 	// While the motor runs, Apple2Machine::Run keeps the CPU going in short
 	// bursts; false once the motor is off or updatedrive wraps to 0.

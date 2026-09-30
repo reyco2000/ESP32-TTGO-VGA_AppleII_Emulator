@@ -11,8 +11,9 @@
  *           the SD card, FabGL's VGA DisplayController and the
  *           PS/2 keyboard and mouse (the joystick), then
  *           constructs Apple2Machine, VGA and
- *           Supervisor. loop() runs one video frame's worth of
- *           6502 cycles, renders and presents.
+ *           Supervisor. The emulation task runs 6502 cycles as
+ *           FramePacer schedules them (60.05 Hz at 1X), renders
+ *           and presents.
  * ============================================================
 */
 
@@ -28,7 +29,10 @@
 #include "src/Tools/Log.h"
 #include "src/Supervisor/Supervisor.h"
 #include "src/Tools/Bootloader.h"
+#include "src/BuildConfig.h"
 #include "src/Version.h"
+#include "src/AppleII/FramePacer.h"
+#include <esp_timer.h>
 
 // Global pointer to keyboard for Apple2Device to read from
 fabgl::Keyboard *keyboard_ptr = nullptr;
@@ -41,6 +45,7 @@ fabgl::Canvas Canvas(&DisplayController);
 VGA *vga;
 Apple2Machine *machine;
 Supervisor *supervisor;
+static FramePacer pacer;
 
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels)
 {
@@ -184,6 +189,18 @@ void setup()
 
     DEBUG_PRINTLN("===> INIT Machine");
     machine->InitMachine();
+    // speed as the user last left it; a measurement build runs flat out
+    // unless built with -DPERF_SPEED=0 (1X)
+#if PERF_TRACE
+#ifdef PERF_SPEED
+    machine->device.speedMode = PERF_SPEED;
+#else
+    machine->device.speedMode = FramePacer::SPEED_MAX;
+#endif
+#else
+    machine->device.speedMode = Settings::LoadSpeed(FramePacer::SPEED_1X);
+#endif
+    pacer.SetSpeed((FramePacer::Speed)machine->device.speedMode);
     supervisor = new Supervisor(machine);
 
     // Disks that were mounted when the machine was switched: the switch
@@ -196,6 +213,12 @@ void setup()
             continue;
         Settings::SaveDisk(drive, "");
         remounted |= machine->Mount(path.c_str(), drive);
+    }
+    String hd = Settings::LoadHardDisk();
+    if (hd.length() > 0)
+    {
+        Settings::SaveHardDisk("");
+        remounted |= machine->MountHardDisk(hd.c_str());
     }
     if (remounted)
         machine->Reset();
@@ -228,10 +251,57 @@ int fpscount = 0;
 unsigned long fpsMillis = 0;
 unsigned long heapCheckMillis = 0;
 
+#if PERF_TRACE
+// Measurement build (BuildConfig.h): mount Karateka 20 s after boot and log
+// each drive motor change, which tools/capture-log.py turns into a load time.
+static void PerfTrace()
+{
+    static bool mounted = false;
+    static bool lastMotor = false;
+    if (!mounted && millis() > 20000)
+    {
+        mounted = true;
+        // the card has held the image in either place
+        static const char* const paths[] = { "/karateka.nib", "/AppleII/karateka.nib" };
+        bool ok = false;
+        for (const char* path : paths)
+            if (!ok && SD.exists(path))
+                ok = machine->Mount(path, 0);
+        if (!ok)
+            listDir(SD, "/AppleII", 0);
+        Serial.printf("[perf] mount %s at %lu\n", ok ? "ok" : "FAILED", millis());
+        machine->Reset();
+    }
+    bool motor = machine->device.GetDiskMotorState();
+    if (motor != lastMotor)
+    {
+        lastMotor = motor;
+        Serial.printf("[perf] motor %s at %lu PC=%04X\n", motor ? "ON" : "off", millis(), machine->cpu.PC);
+    }
+}
+
+static uint32_t perfRenderUs = 0, perfRenderMax = 0, perfRenders = 0;
+#endif
+
+// Sleeps the whole milliseconds, which lets core 0's idle task run, then
+// spins the last part for an exact deadline (the FreeRTOS tick is 1 ms).
+static void WaitMicros(uint32_t us)
+{
+    if (us == 0)
+        return;
+    int64_t until = esp_timer_get_time() + us;
+    if (us > 2000)
+        vTaskDelay(pdMS_TO_TICKS((us - 1000) / 1000));
+    while (esp_timer_get_time() < until)
+        ;
+}
+
 // One video frame: emulate (or run the supervisor), render, count FPS.
 // Runs in EmulationTask on core 0, see setup().
 static void RunFrame()
 {
+    bool drew = true;
+    bool paced = false;
     if (supervisor->IsActive())
     {
         supervisor->Update();
@@ -240,18 +310,47 @@ static void RunFrame()
     }
     else
     {
-        long long cycles = 17050 * 4;
-        machine->Run(cycles);
+        // F4 changed the speed: apply it, and keep it for the next boot
+        if (pacer.GetSpeed() != machine->device.speedMode)
+        {
+            pacer.SetSpeed((FramePacer::Speed)machine->device.speedMode);
+#if !PERF_TRACE
+            Settings::SaveSpeed(machine->device.speedMode);
+#endif
+        }
+
+        FrameStep step = pacer.Begin((uint32_t)esp_timer_get_time(), machine->device.GetDiskMotorState());
+        machine->Run((long long)FramePacer::CYCLES_PER_FRAME * step.frames);
         if (machine->device.supervisorRequested)
         {
             machine->device.supervisorRequested = false;
             supervisor->Open();
         }
-        machine->Render(vga, frame);
+        drew = step.render;
+        paced = true;
+        if (step.render)
+        {
+#if PERF_TRACE
+            PerfTrace();
+            uint32_t t0 = micros();
+#endif
+            machine->Render(vga, frame);
+#if PERF_TRACE
+            uint32_t dt = micros() - t0;
+            perfRenderUs += dt;
+            perfRenders++;
+            if (dt > perfRenderMax)
+                perfRenderMax = dt;
+#endif
+        }
+#if PERF_TRACE
+        else
+            PerfTrace();
+#endif
     }
     vga->show();
 
-    if (frame++ > TARGET_FRAME) 
+    if (frame++ > TARGET_FRAME)
         frame = 0;
 
     if(millis() - heapCheckMillis > 15000)
@@ -261,15 +360,34 @@ static void RunFrame()
         LOGF("PSRam : %d / %d\n", ESP.getFreePsram(), ESP.getPsramSize());
     }
 
-    fpscount++;
-    if(millis() - fpsMillis > 1000)
+    // FPS counts frames actually drawn; speed is emulated cycles against a
+    // real Apple II's 1.020484 MHz
+    if (drew)
+        fpscount++;
+    unsigned long elapsed = millis() - fpsMillis;
+    if (elapsed > 1000)
     {
+        static long long lastTick = 0;
+        long long ticks = machine->cpu.tick - lastTick;
+        lastTick = machine->cpu.tick;
+        if (ticks < 0)                     // the CPU was reset
+            ticks = 0;
+        int percent = (int)(ticks * 100000LL / ((long long)elapsed * 1020484LL));
         fpsMillis = millis();
-        LOGF("FPS : %d\n", fpscount);
+        LOGF("FPS : %d speed : %d%%\n", fpscount, percent);
+#if PERF_TRACE
+        if (perfRenders)
+            Serial.printf("[perf] render avg %u us max %u us\n",
+                          (unsigned)(perfRenderUs / perfRenders), (unsigned)perfRenderMax);
+        perfRenderUs = perfRenderMax = perfRenders = 0;
+#endif
         // feeds the F2 on-screen counter (drawn by Apple2Device::Render)
         machine->device.fpsValue = fpscount;
         fpscount = 0;
     }
+
+    if (paced)
+        WaitMicros(pacer.End((uint32_t)esp_timer_get_time()));
 }
 
 static void EmulationTask(void*)

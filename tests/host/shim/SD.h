@@ -12,6 +12,8 @@
  *           written fail, as they did when this shim was only there to
  *           satisfy Tools/FileSystem.h at compile time; a test that
  *           wants to read a written file looks in HostFiles() itself.
+ *           "r+" opens an existing file for update in place: seek()
+ *           and write() overwrite at the position, as on the ESP32.
  * ============================================================
 */
 
@@ -37,11 +39,15 @@ class File
 {
 public:
 	File() : path(), opened(false), writing(false), pos(0) {}
-	File(const char* p, bool write, bool append)
+	// truncate: "w" empties the file; atEnd: "a" writes after what is there.
+	// "r+" does neither: it reads and overwrites in place.
+	File(const char* p, bool write, bool truncate, bool atEnd)
 		: path(p), opened(true), writing(write), pos(0)
 	{
-		if (write && !append)
+		if (truncate)
 			HostFiles()[path].clear();
+		if (atEnd)
+			pos = HostFiles()[path].size();
 	}
 
 	explicit operator bool() const { return opened; }
@@ -61,9 +67,23 @@ public:
 	{
 		if (!opened || !writing)
 			return 0;
-		HostFiles()[path].append((const char*)buf, len);
+		std::string& data = HostFiles()[path];
+		if (data.size() < pos + len)
+			data.resize(pos + len);
+		data.replace(pos, len, (const char*)buf, len);
+		pos += len;
 		return len;
 	}
+
+	bool seek(size_t p)
+	{
+		if (!opened)
+			return false;
+		pos = p;
+		return true;
+	}
+
+	void flush() {}
 
 	size_t size() { return opened ? HostFiles()[path].size() : 0; }
 	void close() { opened = false; }
@@ -82,10 +102,12 @@ struct HostSD
 {
 	File open(const char* path, const char* mode = FILE_READ)
 	{
-		bool write = (mode[0] == 'w' || mode[0] == 'a');
-		if (!write && !HostFiles().count(path))
+		bool update = (mode[0] == 'r' && mode[1] == '+');
+		bool write = update || mode[0] == 'w' || mode[0] == 'a';
+		// reading, and updating in place, need the file to exist already
+		if ((!write || update) && !HostFiles().count(path))
 			return File();
-		return File(path, write, mode[0] == 'a');
+		return File(path, write, mode[0] == 'w', mode[0] == 'a');
 	}
 	bool exists(const char* path) { return HostFiles().count(path) != 0; }
 	bool mkdir(const char*) { return true; }

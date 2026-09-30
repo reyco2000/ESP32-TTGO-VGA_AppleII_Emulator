@@ -23,14 +23,19 @@
 #include "../Tools/Log.h"
 #include "../Tools/Settings.h"
 #include "../VGA/VGA.h"
+#include "../BuildConfig.h"
 
 Apple2Machine::Apple2Machine(const MachineProfile& p)
-	: profile(p), bootNote("")
+	: profile(p), bootNote(""), bus(mem)
 {
 	DEBUG_PRINTLN("Construct Apple2Machine");
 	cpu.cmos = (profile.cpu == CPU_65C02);
 	device.iie = profile.iieMmu;
 	device.slots[6] = profile.diskIISlot6 ? &device.disk6 : NULL;
+	// slot 7: the autostart ROM scans down from here, so a mounted hard disk
+	// boots before the floppies, as on a real machine with one fitted
+	device.hdd7.Configure(7, &bus);
+	device.slots[7] = &device.hdd7;
 }
 
 Apple2Machine::~Apple2Machine()
@@ -96,6 +101,10 @@ void Apple2Machine::LoadRoms()
 // supervisor shows the ROM as missing, so only the log says so here.
 void Apple2Machine::InstallSerialCard()
 {
+#if PERF_TRACE
+	// a measurement build needs the log, which the card would silence
+	return;
+#endif
 	int slot = Settings::LoadSerial(0);
 	if (!slot)
 		return;
@@ -135,6 +144,9 @@ void Apple2Machine::WarmReset()
 {
 	device.resetRequested = false;
 	mem.ResetSwitches();
+	// the RESET line reaches the Disk II too: a program that hung with the
+	// drive running stops here, and so does fast-disk mode
+	device.disk6.ResetLine();
 	device.col80 = false;
 	device.altCharset = false;
 	device.dhires = false;
@@ -177,6 +189,20 @@ bool Apple2Machine::SetSerialSlot(int slot, bool capture)
 	return ok;
 }
 
+bool Apple2Machine::MountHardDisk(const char* path)
+{
+	bool ok = device.hdd7.Mount(path);
+	// the card shows or hides its firmware with the image
+	mem.Remap();
+	return ok;
+}
+
+void Apple2Machine::UnmountHardDisk()
+{
+	device.hdd7.Unmount();
+	mem.Remap();
+}
+
 void Apple2Machine::Unmount(int drive)
 {
 	device.Unmount(drive);
@@ -197,7 +223,7 @@ void Apple2Machine::Run(long long cycle)
 	device.UpdateInput();
 	if (device.resetRequested)
 		WarmReset();
-	cpu.Run(mem, cycle);
+	cpu.Run(mem, (Cycles)cycle);
 	while (1)
 	{
 		if( device.UpdateFloppyDisk() == false )

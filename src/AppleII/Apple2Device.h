@@ -21,7 +21,9 @@
 #include "AppleVideo.h"
 #include "DiskIICard.h"
 #include "SuperSerialCard.h"
+#include "HardDiskCard.h"
 #include "Joystick.h"
+#include "FramePacer.h"
 #include "../Tools/Log.h"
 
 class CPU;	// 6502 cpu
@@ -48,6 +50,7 @@ public:
 	Card* slots[8];
 	DiskIICard disk6;
 	SuperSerialCard ssc;
+	HardDiskCard hdd7;               // slot 7, shows up once an image is mounted
 
 	// Paddles 0/1 and pushbuttons 0/1, moved by the PS/2 mouse. Not in
 	// Reset(): an emulated reset leaves the stick where it is.
@@ -132,6 +135,8 @@ public:
 	// F2 FPS overlay: toggled from the keyboard, value fed in by the main loop
 	bool fpsOverlay;
 	int  fpsValue;
+	// FramePacer::Speed, switched by F4; the main loop applies and saves it
+	uint8_t speedMode;
 	void InvalidateRenderCache() { video.InvalidateRenderCache(); }
 	void InvalidateFpsOverlayRegion() { video.InvalidateFpsOverlayRegion(); }
 

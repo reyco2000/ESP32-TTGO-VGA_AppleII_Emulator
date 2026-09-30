@@ -31,9 +31,9 @@ namespace DskImage
 	const uint8_t VOLUME    = 254;
 
 	enum SectorOrder { ORDER_DOS, ORDER_PRODOS };
-	enum ImageType { IMAGE_NONE, IMAGE_NIB, IMAGE_DOS, IMAGE_PRODOS };
+	enum ImageType { IMAGE_NONE, IMAGE_NIB, IMAGE_DOS, IMAGE_PRODOS, IMAGE_HDV, IMAGE_2MG };
 
-	// From the file extension, case-insensitive: .nib, .dsk/.do, .po.
+	// From the file extension, case-insensitive: .nib, .dsk/.do, .po, .hdv, .2mg.
 	ImageType TypeFromPath(const char* path);
 
 	// File sector number stored in physical sector 'phys' of a track.
@@ -47,4 +47,14 @@ namespace DskImage
 	// the nibble tracks. Each track's output ends before the next track's
 	// input starts, so only one track of scratch is needed.
 	void NibblizeInPlace(uint8_t* buf, SectorOrder order);
+
+	// Reads a nibble track back the way RWTS does, as a ring: every sector
+	// whose address field names 'track' and whose data field checksums, into
+	// sectors[physical sector]. Returns a bitmask of the physical sectors
+	// found (0xFFFF: all 16).
+	int DenibblizeTrack(const uint8_t* nib, int track, uint8_t sectors[SECTORS][SECTOR_BYTES]);
+
+	// The whole track back into image order, TRACK_BYTES at out. False, with
+	// out untouched, unless all 16 sectors decode. Not reentrant.
+	bool DenibblizeTrackToImage(const uint8_t* nib, int track, SectorOrder order, uint8_t* out);
 }

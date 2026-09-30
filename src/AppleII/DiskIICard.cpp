@@ -11,8 +11,10 @@
  *           images read from SD - .nib as is, .dsk/.do/.po sector
  *           images nibblized when mounted: head stepping from the four
  *           phase switches, drive select, motor, and the shift/load
- *           data latch at registers $C-$F. Shows its boot PROM only
- *           while a disk is inserted.
+ *           data latch at registers $C-$F; tracks written are saved
+ *           back to the image file when the motor stops or the disk
+ *           is ejected. Shows its boot PROM only while a disk is
+ *           inserted.
  * ============================================================
 */
 
@@ -29,6 +31,7 @@ DiskIICard::DiskIICard()
 
 void DiskIICard::Reset()
 {
+	ResetLine();
 	updatedrive = 0;
 	currentDrive = 0;
 	// I/O register
@@ -67,6 +70,7 @@ BYTE DiskIICard::Io(int reg, BYTE value, bool write)
 		// MOTOR OFF
 		case 0x8:
 			disk[currentDrive].motorOn = false;
+			Flush(currentDrive);
 			break;
 
 		// MOTOR ON
@@ -93,7 +97,10 @@ BYTE DiskIICard::Io(int reg, BYTE value, bool write)
 				// leave the latch alone rather than running off the buffer
 			}
 			else if (disk[currentDrive].writeMode)
+			{
 				disk[currentDrive].data[idx] = dLatch;                                  // writing
+				disk[currentDrive].dirtyTracks |= 1ULL << disk[currentDrive].track;
+			}
 			else
 				dLatch = disk[currentDrive].data[idx];                                  // reading
 
@@ -158,8 +165,10 @@ bool DiskIICard::InsertFloppy(const char* filename, int drv)
 	LOGF("Read Floppy OK : %s\n",filename);
 	sprintf(disk[drv].filename, "%s", filename);
 
-	// For now, proceed in write-disabled mode
-	disk[drv].readOnly = false;	// read only
+	// writable: changed tracks go back to the file (Flush)
+	disk[drv].readOnly = false;
+	disk[drv].type = type;
+	disk[drv].dirtyTracks = 0;
 	return true;
 }
 
@@ -167,6 +176,8 @@ bool DiskIICard::Mount(const char* path, int drive)
 {
 	if (drive < 0 || drive > 1)
 		return false;
+	// a disk being replaced saves what was written to it first
+	Flush(drive);
 	if (!InsertFloppy(path, drive))
 	{
 		// short/failed read clobbered the buffer - never leave it half-mounted
@@ -180,6 +191,7 @@ void DiskIICard::Unmount(int drive)
 {
 	if (drive < 0 || drive > 1)
 		return;
+	Flush(drive);
 	disk[drive].Reset();
 }
 
@@ -211,9 +223,60 @@ void DiskIICard::stepMotor(WORD address)
 
 void DiskIICard::setDrv(int drv)
 {
+	Flush(!drv);                                                                  // leaving that drive: save what it wrote
 	disk[drv].motorOn = disk[!drv].motorOn || disk[drv].motorOn;                  // if any of the motors were ON
 	disk[!drv].motorOn = false;                                                   // motor of the other drive is set to OFF
 	currentDrive = drv;                                                                 // set the current drive
+}
+
+// A sector image takes a track back only when all 16 of its sectors still
+// decode; one that does not (copy protection, a half-formatted track) stays
+// in memory, and the log says so. If the card will not take the write at
+// all, the drive turns write-protected, so DOS reports it instead of later
+// writes being lost without a word.
+void DiskIICard::Flush(int drv)
+{
+	FloppyDrive& d = disk[drv];
+	if (!d.dirtyTracks || !d.filename[0])
+		return;
+
+	static uint8_t trackImage[DskImage::TRACK_BYTES];
+	for (int t = 0; t < DskImage::TRACKS; t++)
+	{
+		if (!(d.dirtyTracks & (1ULL << t)))
+			continue;
+		const BYTE* nib = d.data + t * DskImage::NIB_TRACK;
+		bool ok;
+		if (d.type == DskImage::IMAGE_NIB)
+			ok = FileSystem::WriteAt(d.filename, (size_t)t * DskImage::NIB_TRACK, nib, DskImage::NIB_TRACK);
+		else
+		{
+			DskImage::SectorOrder order = (d.type == DskImage::IMAGE_PRODOS) ? DskImage::ORDER_PRODOS : DskImage::ORDER_DOS;
+			if (!DskImage::DenibblizeTrackToImage(nib, t, order, trackImage))
+			{
+				LOGF("[disk] %s: track %d does not decode, not saved\n", d.filename, t);
+				continue;
+			}
+			ok = FileSystem::WriteAt(d.filename, (size_t)t * DskImage::TRACK_BYTES, trackImage, DskImage::TRACK_BYTES);
+		}
+		if (!ok)
+		{
+			LOGF("[disk] cannot write %s: drive %d is now write-protected\n", d.filename, drv + 1);
+			d.readOnly = true;
+			break;
+		}
+	}
+	d.dirtyTracks = 0;
+}
+
+void DiskIICard::ResetLine()
+{
+	for (int drv = 0; drv < 2; drv++)
+	{
+		disk[drv].motorOn = false;
+		disk[drv].writeMode = false;
+		Flush(drv);
+	}
 }
 
 // Floppy disk update

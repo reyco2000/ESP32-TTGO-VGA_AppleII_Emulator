@@ -9,7 +9,8 @@
  *  File   : Supervisor.cpp
  *  Module : F1 supervisor menu. Pauses emulation, browses the SD
  *           card and mounts/unmounts .nib/.dsk/.do/.po images into
- *           either drive via Apple2Machine, and shows an ABOUT page with the
+ *           either drive, and .hdv/.2mg/large .po hard disks into
+ *           slot 7, via Apple2Machine, and shows an ABOUT page with the
  *           firmware version and credits. Paints directly into the
  *           live VGA framebuffer in its own palette, repainting
  *           only when the dirty flag is set, and invalidates the
@@ -860,6 +861,21 @@ void Supervisor::Select()
 			snprintf(pickPath, sizeof(pickPath), "/%s", entries[index].name);
 		else
 			snprintf(pickPath, sizeof(pickPath), "%s/%s", curPath, entries[index].name);
+
+		// a hard disk has one place to go, slot 7: no drive to pick
+		if (HardDiskCard::IsHardDiskImage(pickPath))
+		{
+			if (strcmp(machine->device.hdd7.ImageName(), pickPath) == 0)
+			{
+				machine->UnmountHardDisk();
+				SetStatus("HARD DISK EJECTED");
+			}
+			else if (machine->MountHardDisk(pickPath))
+				SetStatus("HARD DISK MOUNTED (PICK AGAIN TO EJECT)");
+			else
+				SetStatus("LOAD FAILED");
+			return;
+		}
 		mode = PICK_DRIVE;
 	}
 }
@@ -915,6 +931,7 @@ void Supervisor::ChooseMachine(int id)
 	}
 	Settings::SaveDisk(0, machine->device.GetDiskName(0).c_str());
 	Settings::SaveDisk(1, machine->device.GetDiskName(1).c_str());
+	Settings::SaveHardDisk(machine->device.hdd7.ImageName());
 	machineCursor = id;
 	mode = RESTARTING;                       // Render() shows it, then restarts
 }

@@ -220,11 +220,32 @@ Chrome-based browser — no toolchain needed.
 For ESP32_Bootloader users: put `firmware.bin` and `version.txt` in an
 `AppleII/` folder at the SD card root, next to `/roms` and the disk images.
 
+## Measuring speed
+
+A measurement build logs what the normal one keeps quiet, and ignores the saved
+Super Serial Card (which would mute the log):
+
+```bash
+tools/build-dev.sh build/perf -DPERF_TRACE=1          # MAX speed; add -DPERF_SPEED=0 for 1X
+tools/flash-parts.sh build/perf                         # four parts at their offsets: NVS survives
+tools/capture-log.py 80                                 # resets the board, prints and summarises the log
+tools/flash-parts.sh build/dev                          # put a normal build back (tools/build-dev.sh build/dev)
+```
+
+20 s after boot the `PERF_TRACE` build mounts `/karateka.nib` (or
+`/AppleII/karateka.nib`) in drive 1 and resets. The summary gives FPS (frames
+drawn per second), `speed %` (against a real Apple II), the Karateka load time
+(mount to last motor off) and total motor-on time; `[perf] render avg/max` lines
+give the time spent drawing. Same motor events at the same PCs mean identical
+emulated behaviour. Differences under ~5% between builds are layout noise.
+
 ## Checklist for a release
 
 1. Bump `FW_VERSION_STR` in `src/Version.h`
-2. `tests/host/run-cpu-tests.sh` — both CPU suites must PASS
-3. `tests/host/run-layout-tests.sh` — the keyboard layout tables must PASS; `tests/host/run-dsk-tests.sh` — the sector image nibblizer must PASS
+2. `for t in tests/host/run-*-tests.sh; do "$t" || exit 1; done` — every host
+   suite (CPU, keyboard layouts, sector images, Disk II write-back, hard disk
+   card, frame pacing, hires renderer, joystick, serial card) must PASS
+3. Measure speed (below) and compare with the previous release
 4. Build a test image and flash it to hardware. Confirm it boots to BASIC, the F1
    supervisor opens (check **ABOUT** reports the version you just bumped), and
    F2 toggles FPS. With the //e ROMs in `/roms`, switch to the //e in

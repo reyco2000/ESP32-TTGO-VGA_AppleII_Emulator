@@ -58,15 +58,13 @@ private:
 	// 80 wide for the IIe's 80-column mode.
 	int TextCache[24][80];
 	int HiResCache[192][40];
-	BYTE previousBit[192][40];
-	BYTE flashCycle;
 
 	void InvalidateCells();
 	void RenderText(Memory& mem, const Apple2Device& dev, int page, int firstLine, int frame, bool col80);
 	void RenderLores(Memory& mem, int page, int lines);
 	void RenderHires(Memory& mem, int page, int lines);
 	void RenderDoubleHires(Memory& mem, int page, int lines);
-	void RenderFpsOverlay(int fps);
+	void RenderFpsOverlay(int fps, const char* speed);
 };
 
 #endif

@@ -24,7 +24,7 @@ ESP32-VGA_AppleII_Emulator.ino   setup: SD, VGA, PS/2, picks the machine, starts
         ├── CPU                    6502 / 65C02 interpreter
         ├── Memory                 page-table address map: Language Card, IIe MMU, $Cxxx ROM
         └── Apple2Device           soft switches, keyboard, speaker
-              ├── Card* slots[8]   slot 6: DiskIICard, slot 1 or 2: SuperSerialCard
+              ├── Card* slots[8]   slot 6: DiskIICard, slot 7: HardDiskCard, slot 1 or 2: SuperSerialCard
               ├── Joystick         paddles 0/1 and buttons from the PS/2 mouse
               └── AppleVideo       text / lores / hires / double hires -> VGA
   ├── MachineProfile               what distinguishes the models
@@ -58,9 +58,18 @@ controller (a 640x200 16-colour framebuffer, shown line-doubled on standard
 supervisor, and starts `EmulationTask` on **core 0** (see the constraints
 below). The Arduino `loop()` task then deletes itself.
 
-`RunFrame()` runs a fixed number of CPU cycles per frame (`17050 * 4`), renders
-and counts frames for the F2 overlay. There is no host-speed throttling beyond
-that fixed cycle count.
+`RunFrame()` asks `FramePacer` (`src/AppleII/FramePacer.*`, tested on the host
+by `tests/host/run-pacer-tests.sh`) what to do each pass. A real Apple II draws
+60.05 frames a second of 17,030 CPU cycles (65 cycles x 262 lines). At **1X**,
+the default, the loop runs one frame's cycles, draws, and waits out the rest of
+the 16,652 us (`vTaskDelay` for whole milliseconds, then a short spin). At
+**MAX** (F4, saved in NVS) it runs four frames' worth and never waits. While the
+Disk II motor runs it goes flat out at either speed and draws only every 100 ms,
+so disk loads are as fast as before. When the emulator falls behind, drawing is
+skipped for at most three frames in a row, and a backlog of more than eight
+frames is dropped rather than caught up. The F2 counter shows frames actually
+drawn; the serial log also prints `speed : N%` against a real Apple II's
+1.020484 MHz.
 
 ### Components
 
@@ -101,8 +110,37 @@ buffer and nibblized in place by `DskImage` (`src/AppleII/DskImage.*`, tested on
 the host by `tests/host/run-dsk-tests.sh`) as standard 16-sector 6-and-2 tracks,
 volume 254, with the DOS or ProDOS sector interleave picked by the extension.
 Each track's output ends before the next track's input begins, so it needs one
-4K track of scratch rather than a second disk buffer. Writes change only the
-nibble buffer; nothing goes back to the card. The card hides its boot PROM while
+4K track of scratch rather than a second disk buffer. A write through the data
+latch marks its track dirty; `Flush()` saves the dirty tracks when the motor
+stops, when the other drive is selected, and on eject. A `.nib` takes the raw
+track back (`FileSystem::WriteAt`, an in-place overwrite). A sector image takes
+it only when all 16 sectors still decode (`DskImage::DenibblizeTrackToImage`);
+a track that does not (copy protection, a half-formatted track) stays in memory
+and is logged. If the card refuses a write the drive turns write-protected, so
+DOS reports it. Only the RESET line (power-up reset and Ctrl-Reset) stops the
+motors besides `$C088`; `$CFFF` only releases the `$C800` ROMs, as on the real
+card.
+
+**`HardDiskCard`** (`src/AppleII/HardDiskCard.*`, `tests/host/run-hdd-tests.sh`)
+sits in slot 7, after AppleWin's `Harddisk.cpp`: one ProDOS block device backed
+by a `.hdv`, a ProDOS-order `.2mg` (header: format at `$0C`, locked flag bit 31
+at `$10`, data offset at `$18`, length at `$1C`) or a `.po` bigger than 140K,
+kept open on the SD card and read and written 512 bytes at a time. Its 256-byte
+firmware, built for the slot it is in:
+
+| Address | Contents |
+|---|---|
+| `$Cn01/03/05/07` | ID bytes `$20/$00/$03/$3C`: bootable, a block device, not SmartPort |
+| `$Cn08` | boot: READ block 0 of unit `$n0` to `$0800`, `JMP $0801` with X = `$n0`. On a read error or a blank boot block (`$0800` = `$00`), back to the autostart slot scan at `$FABA` (same address in the ][+ and //e ROMs) so the floppy boots, or `JMP $E000` if the scan did not bring us here |
+| `$Cn40` | driver: `STA $C0x0` runs the command, then A = error code (register 1), X/Y = block count (registers 2/3), `CMP #1` sets carry on an error |
+| `$CnFC-FD` / `$CnFE` / `$CnFF` | block count / status `$07` / driver entry `$40` |
+
+The driver's write to register 0 makes the card read ProDOS's command block in
+zero page (`$42` command, `$43` unit, `$44-45` buffer, `$46-47` block) through
+`CardBus` (`MemoryBus` in `Apple2Machine`: memory as the CPU sees it) and do the
+whole transfer before the next instruction. STATUS, READ, WRITE and FORMAT are
+handled; drive 2, another slot, or a block past the end return `$28`/`$27`. With
+no image the card has no firmware, so the boot scan passes slot 7 by. The card hides its boot PROM while
 no disk is inserted, so the machine boots to BASIC instead of hanging on an
 empty drive.
 
@@ -230,10 +268,20 @@ Enabling FabGL double buffering would silently break this: cached cells would be
 stale in whichever buffer was not written, showing up as flickering leftover
 glyphs. `vga->show()` is deliberately a no-op.
 
+### No periodic repaint
+
+The renderer used to repaint every cell every 30 passes. The caches already
+notice every change (the text key includes the flash phase), so that only cost
+time. What it was hiding was `AppleVideo::Reset()` marking lores and hires cells
+as drawn with value 0; `Reset()` now leaves every cell dirty. Hires cells are
+drawn through `HiresRender`'s 8 KB lookup table (every byte, both column
+parities, both left neighbours), checked against the old per-dot loop by
+`tests/host/run-hires-tests.sh`.
+
 ### Overlays must invalidate the cells they cover
 
 The F2 FPS overlay (`fpsOverlay`/`fpsValue`, drawn by
-`AppleVideo::RenderFpsOverlay()` in the top-right seven text cells) is host-side
+`AppleVideo::RenderFpsOverlay()` in the top-right nine text cells, `999FPS 1X`) is host-side
 UI, not emulated state — it is initialised in the `Apple2Device` constructor
 rather than `Reset()`, and the frame loop feeds it the per-second frame count.
 
@@ -270,9 +318,17 @@ into a release.
 
 ## Emulation speed
 
-At the idle BASIC prompt both machines run at about 35 frames per second, and
-*Karateka* loads in about 22.5 seconds. Three things dominate performance, all
-found by measuring on hardware rather than by reading the code:
+At 1X the machine runs at 100% of a real Apple II and draws 60 frames a second.
+At MAX the idle ][+ runs at about 266% (40 passes of four frames a second), and
+*Karateka* loads in about 19 seconds. Measure with a `PERF_TRACE` build (see
+[BUILD_AND_RELEASE.md](BUILD_AND_RELEASE.md#measuring-speed)). Four things
+dominate performance, all found by measuring on hardware rather than by reading
+the code:
+
+**The CPU's cycle budget is 32-bit** (`Cycles` in `AppleCpu.h`). Every bus
+access decrements it; as a `long long` that was 64-bit arithmetic on a 32-bit
+CPU, and switching it gave 18% more speed and a 14% faster Karateka load. The
+running total since reset (`tick`) stays 64-bit.
 
 **Memory placement and core assignment** — see the constraints above.
 

@@ -21,7 +21,7 @@
 #include "AppleMem.h"
 
 // (zp) : 65C02 zero page indirect. The pointer wraps within page zero.
-WORD CPU::addr_mode_ZPI(Memory& mem, long long& cycle)
+WORD CPU::addr_mode_ZPI(Memory& mem, Cycles& cycle)
 {
 	BYTE zp = Fetch(mem, cycle);
 	BYTE lo = ReadByte(mem, zp, cycle);
@@ -29,7 +29,7 @@ WORD CPU::addr_mode_ZPI(Memory& mem, long long& cycle)
 	return lo | (hi << 8);
 }
 
-bool CPU::ExecuteCmos(BYTE inst, Memory& mem, long long& cycle)
+bool CPU::ExecuteCmos(BYTE inst, Memory& mem, Cycles& cycle)
 {
 	// Rockwell / WDC bit instructions: RMBn/SMBn zp ($x7), BBRn/BBSn zp,rel ($xF)
 	if ((inst & 0x0F) == 0x07 || (inst & 0x0F) == 0x0F)
