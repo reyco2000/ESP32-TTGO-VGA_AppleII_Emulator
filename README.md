@@ -2,6 +2,12 @@
 
 An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images, plus `.hdv` / `.2mg` ProDOS hard disks, are loaded from an SD card — no host computer involved.
 
+## What's new in 0.9.2
+
+- **Drive picker popup.** Selecting a floppy image in the F1 menu opens a window with **DRIVE 1** and **DRIVE 2** buttons, each showing the disk it holds. If the chosen drive already has a disk, a second window asks before replacing it (**CANCEL** is the default). A hard disk image asks the same when another one is mounted in slot 7.
+- **Drive buttons show the disk.** The two drive buttons now read `D1:NAME` with an eject mark, and pressing one ejects that disk. The separate disk line and the directory path line are gone, so the file list shows 14 rows instead of 12, and the title names the machine, e.g. `APPLE ][+ SUPERVISOR`.
+- **New ABOUT screen** with the CoCo Byte Club logo and centred credits.
+
 ## What's new in 0.9.1
 
 - **F2 counter readable on the //e.** On the //e the counter's letters showed up as MouseText symbols and solid blocks; it now reads `60FPS 1X` as on the ][+.
@@ -87,12 +93,12 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 
 If you just want to run the emulator without building from source, grab the pre-built firmware and use the browser-based flasher — no toolchain, no drivers to install beyond your board's USB-serial driver.
 
-1. Download `ESP32-AppleII-v0.9.1.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
+1. Download `ESP32-AppleII-v0.9.2.bin` from the [Releases](https://github.com/reyco2000/ESP32-TTGO-VGA_AppleII_Emulator/releases) page
 2. Connect your TTGO VGA32 board via USB
 3. Open [ESP Web Tool](https://espressif.github.io/esptool-js/) in a Chrome or Edge browser
 4. Click **Connect** and select the board's serial port
 5. Set the flash offset to `0x0000`
-6. Choose the downloaded `ESP32-AppleII-v0.9.1.bin`
+6. Choose the downloaded `ESP32-AppleII-v0.9.2.bin`
 7. Click **Program** and wait for the flash to complete
 
 Hold the **BOOT** button on the board while clicking **Connect** if the browser cannot reach the device.
@@ -107,7 +113,7 @@ Same binary, if you'd rather not use a browser:
 
 ```bash
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash 0x0 ESP32-AppleII-v0.9.1.bin
+  write_flash 0x0 ESP32-AppleII-v0.9.2.bin
 ```
 
 Depending on the board's USB-serial chip the port may enumerate as `/dev/ttyACM0` instead of `/dev/ttyUSB0`.
@@ -120,7 +126,7 @@ Each release carries two builds. Use the one that matches how you run the board:
 
 | You want | Release files | Install |
 |---|---|---|
-| Only this emulator, flashed over USB | `ESP32-AppleII-v0.9.1.bin` | at offset `0x0`, as above |
+| Only this emulator, flashed over USB | `ESP32-AppleII-v0.9.2.bin` | at offset `0x0`, as above |
 | This emulator in the ESP32_Bootloader menu | `firmware.bin` + `version.txt` | on the SD card, as below |
 
 The two are not interchangeable: `firmware.bin` is built to hand the board back to the bootloader, and the standalone image is not.
@@ -147,7 +153,7 @@ If `firmware.bin` and `version.txt` sit in the card root instead of a folder, th
 
 - **Power cycle** to get back to the bootloader menu, and pick another emulator from there.
 - **MACHINE** switches between the ][+ and the //e and restarts straight into the emulator, not the menu.
-- **ABOUT** shows `0.9.1 (SD BOOTLOADER)` in this build, so you can tell which one is running.
+- **ABOUT** shows `0.9.2 (SD BOOTLOADER)` in this build, so you can tell which one is running.
 - **Updating:** replace both files in `AppleII/` with the ones from the new release. The bootloader reflashes only when `version.txt` changes, so always copy both.
 - **Settings** (machine, keyboard layout) are kept in the board's NVS, which the bootloader shares, so they carry over between sessions. They are lost if the whole flash is erased.
 
@@ -179,7 +185,7 @@ tools/package-bootloader.sh      # output in build/sdcard/AppleII/
 
 It is the same source compiled with `-DBUILD_TARGET=1` (see [`src/BuildConfig.h`](src/BuildConfig.h)). The standalone build stays the default.
 
-The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.9.1.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
+The image is named after `FW_VERSION_STR` in [`src/Version.h`](src/Version.h) — currently `ESP32-AppleII-v0.9.2.bin`. See [docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md) for the full build, test and release procedure.
 
 The CPU cores have host-side tests that run on the build machine rather than the ESP32 (they need `g++` and `curl`, and download the test images on first run):
 
@@ -226,11 +232,11 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 ## Usage
 
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
-- Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (then `1`/`2` picks the drive; a hard disk image mounts in slot 7 straight away, and picking the mounted one again ejects it), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
+- Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (a window then asks for **DRIVE 1** or **DRIVE 2**, and asks again before replacing a disk already there; a hard disk image mounts in slot 7, and picking the mounted one again ejects it), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
 - **MACHINE** switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
 - **SERIAL** installs or removes the Super Serial Card, and turns the SD card capture file on and off (see [Super Serial Card](#super-serial-card)).
 - **KEYBOARD** picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
-- Use the menu's **RESET** button (or `PR#6` from BASIC) to boot a mounted disk. **UNMOUNT D1** and **UNMOUNT D2** empty a drive.
+- Use the menu's **RESET** button (or `PR#6` from BASIC) to boot a mounted disk. The **D1** and **D2** buttons show the mounted disks; pressing one ejects it.
 - On the //e, `PR#3` turns on 80-column text; **Esc** then **4** or **8** switches between 40 and 80 columns, and **Esc** then **Ctrl+Q** turns the 80-column firmware off.
 
 | Keys | Action |
