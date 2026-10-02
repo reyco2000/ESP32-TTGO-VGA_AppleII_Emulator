@@ -28,8 +28,8 @@ class VGA;
 #define SUP_PATH_LEN    256
 #define SUP_LIST_TOP    4    // first text row of the picker lists
 #define SUP_LIST_ROWS   16   // visible picker rows
-#define SUP_FILES_TOP   8    // first text row of the SD browser, below the buttons
-#define SUP_FILES_ROWS  12   // visible SD browser rows
+#define SUP_FILES_TOP   7    // first text row of the SD browser, below the buttons
+#define SUP_FILES_ROWS  14   // visible SD browser rows
 
 // Buttons above the SD browser: two rows, laid out in Supervisor.cpp
 enum SupButton
@@ -61,7 +61,7 @@ public:
 	void Render(VGA* vga);
 
 private:
-	enum Mode { BROWSE, PICK_DRIVE, ABOUT, PICK_MACHINE, PICK_KEYBOARD, PICK_SERIAL, RESTARTING };
+	enum Mode { BROWSE, PICK_DRIVE, CONFIRM_REPLACE, ABOUT, PICK_MACHINE, PICK_KEYBOARD, PICK_SERIAL, RESTARTING };
 
 	Apple2Machine* machine;
 	AppleFont font;
@@ -84,6 +84,8 @@ private:
 	int scroll;                  // first visible virtual index
 	char status[SCREENTEXT_X + 1];
 	char pickPath[SUP_PATH_LEN]; // full path of file awaiting drive choice
+	int popupCursor;             // focused popup button: 0 left, 1 right
+	int pickDrive;               // drive awaiting CONFIRM_REPLACE, -1 = the hard disk
 
 	int machineCursor;           // PICK_MACHINE selection, then the model restarting into
 	const char* machineMissing[MACHINE_COUNT];   // first missing ROM per model, NULL = bootable
@@ -104,7 +106,10 @@ private:
 	void UpDir();
 	void Select();               // Enter pressed on an SD entry
 	void Press(int btn);         // Enter pressed on a button
+	void ChooseDrive(int drive); // drive picked in the popup
+	void LeaveConfirm();         // CONFIRM_REPLACE answered no
 	void MountTo(int drive);
+	void MountHardDisk();
 	void MoveCursor(int delta);
 	void MoveFocus(int dx, int dy);   // arrow keys in BROWSE mode
 	void FocusButton(int btn);
@@ -124,10 +129,15 @@ private:
 	void DrawRow(int row, const char* text, int fg, int bg);
 	void DrawBar(int row, const char* text, int fg, int bg);
 	void DrawTextXY(int x, int y, const char* text, int fg, int bg);
-	void DrawRule(int row);          // six-band Apple stripe rule
+	void DrawRule(int row, int x0 = 0, int x1 = -1);   // six-band; x1 -1 = screen edge Apple stripe rule
+	void DrawCentered(int row, const char* text, int fg, int bg);
 	void DrawChrome(int listTop = SUP_LIST_TOP, int listRows = SUP_LIST_ROWS);
-	void DrawDiskSlot(int col, int drive);
+	void DrawRaised(int x, int y, int w, int h, int face);
 	void DrawButton(int btn);
+	void DrawPopup(const char* line1, const char* line2);
+	void DrawPopupButton(int side, int row, const char* label);
+	void RenderDrivePopup();
+	void RenderConfirmPopup();
 	void RenderBrowse();
 	void RenderAbout();
 	void RenderMachines();

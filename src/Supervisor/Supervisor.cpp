@@ -80,15 +80,17 @@ static const int stripe[6] = { C_GREEN, C_YELLOW, C_ORANGE,
 static inline int ColX(int col) { return SUP_ORIGIN_X + col * SUP_CELL_W; }
 static inline int RowY(int row) { return SUP_ORIGIN_Y + row * FONT_Y; }
 
-// Buttons sit between the two stripe rules (rows 2 and 7) in pixel space, off
+// Buttons sit between the two stripe rules (rows 1 and 6) in pixel space, off
 // the text grid, so each can have a 2px margin around its label. The five
 // top-row buttons span the same 40..598 the browser does, with 7px of padding
-// either side of a label and about 13px between buttons. The unmount row
-// spans the columns above it: D1 under the left half, D2 under the right,
-// which is also where UP/DOWN land.
+// either side of a label and about 13px between buttons. The drive row is
+// two equal halves, D1 left and D2 right: each shows the disk it holds and
+// ejects it when pressed.
 #define BTN_H     12
-#define BTN_TOP_Y 29
-#define BTN_BOT_Y 46
+#define BTN_TOP_Y 21
+#define BTN_BOT_Y 38
+#define BTN_PAD   7    // button edge to its label or icon
+#define EJECT_W   14
 
 struct ButtonRect { const char* label; int x, y, w; };
 static const ButtonRect buttonRects[BTN_COUNT] =
@@ -98,11 +100,20 @@ static const ButtonRect buttonRects[BTN_COUNT] =
 	{ "KEYBOARD",   263, BTN_TOP_Y, 126 },
 	{ "SERIAL",     402, BTN_TOP_Y,  98 },
 	{ "ABOUT",      514, BTN_TOP_Y,  84 },
-	{ "UNMOUNT D1", 40,  BTN_BOT_Y, 256 },
-	{ "UNMOUNT D2", 328, BTN_BOT_Y, 270 },
+	{ "D1:",        40,  BTN_BOT_Y, 272 },
+	{ "D2:",        326, BTN_BOT_Y, 272 },
 };
 
 static inline bool TopRow(int btn) { return btn <= BTN_ABOUT; }
+
+// Popup panel over the SD browser: 34 text columns inside a raised frame,
+// with two 16-column buttons side by side.
+#define POP_COL      3
+#define POP_COLS     34
+#define POP_TOP      10   // first text row covered by the panel
+#define POP_ROWS     9
+#define POP_BTN_COLS 16
+#define POP_BTN_GAP  2
 
 // Serial card picker: the three places the card can be, then the line that
 // turns the capture file on and off.
@@ -116,11 +127,24 @@ static const char* serialRowLabel[SUP_SERIAL_ROWS] =
 	"ALSO CAPTURE TO SD CARD",
 };
 
-// file name without its directory, for the D1/D2 line and hints
+// file name without its directory, for the drive buttons and hints
 static const char* BaseName(const char* path)
 {
 	const char* p = strrchr(path, '/');
 	return p ? p + 1 : path;
+}
+
+// copy of text cut to room characters, ending in '~' when it did not fit
+static void FitName(char* out, int room, const char* text)
+{
+	if ((int)strlen(text) > room)
+	{
+		memcpy(out, text, room - 1);
+		out[room - 1] = '~';
+		out[room] = '\0';
+	}
+	else
+		snprintf(out, room + 1, "%s", text);
 }
 
 Supervisor::Supervisor(Apple2Machine* m)
@@ -144,6 +168,8 @@ Supervisor::Supervisor(Apple2Machine* m)
 	scroll = 0;
 	status[0] = '\0';
 	pickPath[0] = '\0';
+	popupCursor = 0;
+	pickDrive = 0;
 	machineCursor = 0;
 	for (int i = 0; i < MACHINE_COUNT; i++)
 		machineMissing[i] = NULL;
@@ -244,15 +270,25 @@ void Supervisor::DrawBar(int row, const char* text, int fg, int bg)
 
 // Six-band Apple stripe rule, drawn in the middle of a text row. The font has
 // no box-drawing glyphs, so every rule and panel here is a pixel fill.
-void Supervisor::DrawRule(int row)
+// Spans x0..x1, the full width unless a screen's margin accent is in the way.
+void Supervisor::DrawRule(int row, int x0, int x1)
 {
+	if (x1 < 0)
+		x1 = VGA_WIDTH;
 	int y = RowY(row) + 2;
 	for (int i = 0; i < 6; i++)
 	{
-		int x0 = (VGA_WIDTH * i) / 6;
-		int x1 = (VGA_WIDTH * (i + 1)) / 6;
-		vga->fillRect(x0, y, x1 - x0, 3, stripe[i]);
+		int b0 = x0 + ((x1 - x0) * i) / 6;
+		int b1 = x0 + ((x1 - x0) * (i + 1)) / 6;
+		vga->fillRect(b0, y, b1 - b0, 3, stripe[i]);
 	}
+}
+
+// Text centred on the screen rather than the text grid, so odd lengths
+// centre too.
+void Supervisor::DrawCentered(int row, const char* text, int fg, int bg)
+{
+	DrawTextXY((VGA_WIDTH - (int)strlen(text) * SUP_CELL_W) / 2, RowY(row), text, fg, bg);
 }
 
 // Page field plus the vertical stripe accent in the right margin, alongside
@@ -268,56 +304,140 @@ void Supervisor::DrawChrome(int listTop, int listRows)
 		vga->fillRect(612, top + i * band, 16, band, stripe[i]);
 }
 
-// "D1: NAME" in a 20-column half of the disk line; names that do not fit
-// end in '~' like DrawRow's.
-void Supervisor::DrawDiskSlot(int col, int drive)
+// Raised box: light top/left edge, dark bottom/right edge and a 1px drop
+// shadow.
+void Supervisor::DrawRaised(int x, int y, int w, int h, int face)
 {
-	char label[4] = { 'D', (char)('1' + drive), ':', '\0' };
-	DrawText(col, 1, label, C_GREY, C_BG);
-
-	std::string path = machine->device.GetDiskName(drive);
-	if (path.empty())
-	{
-		DrawText(col + 4, 1, "(EMPTY)", C_GREY, C_BG);
-		return;
-	}
-
-	const int room = 15;                     // leaves a space before D2
-	char name[room + 1];
-	const char* base = BaseName(path.c_str());
-	if ((int)strlen(base) > room)
-	{
-		memcpy(name, base, room - 1);
-		name[room - 1] = '~';
-		name[room] = '\0';
-	}
-	else
-		snprintf(name, sizeof(name), "%s", base);
-	DrawText(col + 4, 1, name, C_GREEN, C_BG);
+	vga->fillRect(x, y, w, h, face);
+	vga->fillRect(x, y, w, 1, C_WHITE);
+	vga->fillRect(x, y, 1, h, C_WHITE);
+	vga->fillRect(x, y + h - 1, w, 1, C_BLACK);
+	vga->fillRect(x + w - 1, y, 1, h, C_BLACK);
+	vga->fillRect(x + 1, y + h, w, 1, C_BLACK);
+	vga->fillRect(x + w, y + 1, 1, h, C_BLACK);
 }
 
-// Raised button: light top/left edge, dark bottom/right edge and a 1px drop
-// shadow. The focused one takes the selection bar's cyan; an unmount button
-// with nothing to unmount has a dimmed label.
+// The focused button takes the selection bar's cyan. A drive button names
+// the disk it holds, "D1:NAME" with an eject mark at its right edge, since
+// pressing it unmounts; an empty drive has a dimmed label and no mark.
 void Supervisor::DrawButton(int btn)
 {
 	const ButtonRect& r = buttonRects[btn];
 	bool focused = (btn == focusBtn);
-	bool idle = (btn == BTN_UNMOUNT1 && !machine->device.HasFloppy(0)) ||
-	            (btn == BTN_UNMOUNT2 && !machine->device.HasFloppy(1));
 	int face = focused ? C_CYAN : C_GREY;
-	int text = (idle && !focused) ? C_DIM : C_BLACK;
 
-	vga->fillRect(r.x, r.y, r.w, BTN_H, face);
-	vga->fillRect(r.x, r.y, r.w, 1, C_WHITE);
-	vga->fillRect(r.x, r.y, 1, BTN_H, C_WHITE);
-	vga->fillRect(r.x, r.y + BTN_H - 1, r.w, 1, C_BLACK);
-	vga->fillRect(r.x + r.w - 1, r.y, 1, BTN_H, C_BLACK);
-	vga->fillRect(r.x + 1, r.y + BTN_H, r.w, 1, C_BLACK);
-	vga->fillRect(r.x + r.w, r.y + 1, 1, BTN_H, C_BLACK);
+	DrawRaised(r.x, r.y, r.w, BTN_H, face);
 
-	int tw = strlen(r.label) * SUP_CELL_W;
-	DrawTextXY(r.x + (r.w - tw) / 2, r.y + 2, r.label, text, face);
+	if (TopRow(btn))
+	{
+		int tw = strlen(r.label) * SUP_CELL_W;
+		DrawTextXY(r.x + (r.w - tw) / 2, r.y + 2, r.label, C_BLACK, face);
+		return;
+	}
+
+	char label[SCREENTEXT_X + 1];
+	std::string path = machine->device.GetDiskName(btn - BTN_UNMOUNT1);
+	if (path.empty())
+	{
+		snprintf(label, sizeof(label), "%s (EMPTY)", r.label);
+		int tw = strlen(label) * SUP_CELL_W;
+		DrawTextXY(r.x + (r.w - tw) / 2, r.y + 2, label, focused ? C_BLACK : C_DIM, face);
+		return;
+	}
+
+	// the name gets what is left of the eject mark and the label's "D1:"
+	int room = (r.w - 3 * BTN_PAD - EJECT_W) / SUP_CELL_W - (int)strlen(r.label);
+	char name[SCREENTEXT_X + 1];
+	FitName(name, room, BaseName(path.c_str()));
+	snprintf(label, sizeof(label), "%s%s", r.label, name);
+	DrawTextXY(r.x + BTN_PAD, r.y + 2, label, C_BLACK, face);
+
+	// eject mark: a triangle over a bar. Pixels are over twice as tall as
+	// they are wide here, so four rows make the triangle.
+	int ex = r.x + r.w - BTN_PAD - EJECT_W;
+	for (int i = 0; i < 4; i++)
+		vga->fillRect(ex + 6 - 2 * i, r.y + 2 + i, 2 + 4 * i, 1, C_BLACK);
+	vga->fillRect(ex, r.y + 7, EJECT_W, 2, C_BLACK);
+}
+
+// Popup frame with up to two lines of heading; the buttons and the hint line
+// are the caller's.
+void Supervisor::DrawPopup(const char* line1, const char* line2)
+{
+	DrawRaised(ColX(POP_COL) - 8, RowY(POP_TOP), POP_COLS * SUP_CELL_W + 16,
+	           POP_ROWS * FONT_Y, C_BARBG);
+	DrawText(POP_COL, POP_TOP + 1, line1, C_WHITE, C_BARBG);
+	if (line2)
+		DrawText(POP_COL, POP_TOP + 2, line2, C_WHITE, C_BARBG);
+}
+
+// One of the popup's two buttons, side 0 left or 1 right, its label on the
+// given text row.
+void Supervisor::DrawPopupButton(int side, int row, const char* label)
+{
+	int x = ColX(POP_COL + side * (POP_BTN_COLS + POP_BTN_GAP));
+	int y = RowY(row) - 2;
+	int w = POP_BTN_COLS * SUP_CELL_W;
+	int face = (side == popupCursor) ? C_CYAN : C_GREY;
+
+	DrawRaised(x, y, w, BTN_H, face);
+	int tw = strlen(label) * SUP_CELL_W;
+	DrawTextXY(x + (w - tw) / 2, y + 2, label, C_BLACK, face);
+}
+
+// "Mount to which drive": a button per drive with what it holds underneath.
+void Supervisor::RenderDrivePopup()
+{
+	char name[POP_COLS + 1];
+	char line[POP_COLS + 1];
+	FitName(name, POP_COLS - 6, BaseName(pickPath));
+	snprintf(line, sizeof(line), "MOUNT %s", name);
+	DrawPopup(line, NULL);
+
+	DrawPopupButton(0, POP_TOP + 3, "DRIVE 1");
+	DrawPopupButton(1, POP_TOP + 3, "DRIVE 2");
+	for (int drv = 0; drv < 2; drv++)
+	{
+		int col = POP_COL + drv * (POP_BTN_COLS + POP_BTN_GAP);
+		std::string path = machine->device.GetDiskName(drv);
+		if (path.empty())
+			DrawText(col, POP_TOP + 5, "(EMPTY)", C_GREY, C_BARBG);
+		else
+		{
+			FitName(name, POP_BTN_COLS, BaseName(path.c_str()));
+			DrawText(col, POP_TOP + 5, name, C_GREEN, C_BARBG);
+		}
+	}
+
+	DrawText(POP_COL, POP_TOP + 7, "ARROWS:CHOOSE ENTER:OK ESC:CANCEL", C_GREY, C_BARBG);
+}
+
+// "Replace the disk in there": asked before a mount displaces another image.
+void Supervisor::RenderConfirmPopup()
+{
+	char name[POP_COLS + 1];
+	char line1[POP_COLS + 1];
+	char line2[POP_COLS + 1];
+
+	if (pickDrive < 0)
+	{
+		FitName(name, POP_COLS - 14, BaseName(machine->device.hdd7.ImageName()));
+		snprintf(line1, sizeof(line1), "HARD DISK HAS %s", name);
+	}
+	else
+	{
+		std::string path = machine->device.GetDiskName(pickDrive);
+		FitName(name, POP_COLS - 12, BaseName(path.c_str()));
+		snprintf(line1, sizeof(line1), "DRIVE %d HAS %s", pickDrive + 1, name);
+	}
+	FitName(name, POP_COLS - 14, BaseName(pickPath));
+	snprintf(line2, sizeof(line2), "REPLACE WITH %s?", name);
+	DrawPopup(line1, line2);
+
+	DrawPopupButton(0, POP_TOP + 4, "REPLACE");
+	DrawPopupButton(1, POP_TOP + 4, "CANCEL");
+
+	DrawText(POP_COL, POP_TOP + 7, "ARROWS:CHOOSE ENTER:OK ESC:BACK", C_GREY, C_BARBG);
 }
 
 // Colour for one list row. The selection bar is a swapped fg/bg pair rather
@@ -421,12 +541,36 @@ void Supervisor::Update()
 		if (mode == PICK_DRIVE)
 		{
 			char ascii = keyboard_ptr->virtualKeyToASCII(vk);
-			if (ascii == '1')
-				MountTo(0);
+			if (vk == fabgl::VK_LEFT)
+				popupCursor = 0;
+			else if (vk == fabgl::VK_RIGHT)
+				popupCursor = 1;
+			else if (vk == fabgl::VK_RETURN)
+				ChooseDrive(popupCursor);
+			else if (ascii == '1')
+				ChooseDrive(0);
 			else if (ascii == '2')
-				MountTo(1);
+				ChooseDrive(1);
 			else if (vk == fabgl::VK_ESCAPE)
 				mode = BROWSE;
+			continue;
+		}
+
+		if (mode == CONFIRM_REPLACE)
+		{
+			if (vk == fabgl::VK_LEFT)
+				popupCursor = 0;
+			else if (vk == fabgl::VK_RIGHT)
+				popupCursor = 1;
+			else if (vk == fabgl::VK_RETURN && popupCursor == 0)
+			{
+				if (pickDrive < 0)
+					MountHardDisk();
+				else
+					MountTo(pickDrive);
+			}
+			else if (vk == fabgl::VK_RETURN || vk == fabgl::VK_ESCAPE)
+				LeaveConfirm();
 			continue;
 		}
 
@@ -490,20 +634,19 @@ void Supervisor::Render(VGA* vgaOut)
 		RenderBrowse();
 }
 
-// Title, the D1/D2 line, a stripe, the two button rows, a stripe, then the
-// SD browser.
+// Title, a stripe, the two button rows, a stripe, then the SD browser.
 void Supervisor::RenderBrowse()
 {
 	DrawChrome(SUP_FILES_TOP, SUP_FILES_ROWS);
-	DrawBar(0, "               SUPERVISOR", C_WHITE, C_BARBG);
+	char title[SCREENTEXT_X + 1];
+	snprintf(title, sizeof(title), "%s SUPERVISOR", machine->profile.name);
+	DrawBar(0, "", C_WHITE, C_BARBG);
+	DrawCentered(0, title, C_WHITE, C_BARBG);
 
-	DrawDiskSlot(0, 0);
-	DrawDiskSlot(20, 1);
-	DrawRule(2);
-
+	DrawRule(1);
 	for (int b = 0; b < BTN_COUNT; b++)
 		DrawButton(b);
-	DrawRule(7);
+	DrawRule(6);
 
 	char label[SUP_NAME_LEN + 24];
 	int count = VirtualCount();
@@ -518,16 +661,37 @@ void Supervisor::RenderBrowse()
 		DrawRow(SUP_FILES_TOP + i, label, fg, bg);
 	}
 
-	vga->fillRect(0, RowY(20) + 3, 320, 1, C_DIM);
+	vga->fillRect(0, RowY(21) + 3, 320, 1, C_DIM);
+
+	DrawRow(22, status, sdError ? C_RED : C_AMBER, C_BG);
+	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:EXIT", C_GREY, C_BARBG);
 
 	if (mode == PICK_DRIVE)
-		DrawRow(21, "MOUNT TO: 1)DRIVE 1 2)DRIVE 2 ESC)BACK", C_YELLOW, C_BG);
-	else
-		DrawRow(21, status, sdError ? C_RED : C_AMBER, C_BG);
-
-	DrawRow(22, curPath, C_DIMCYAN, C_BG);
-	DrawBar(23, " ARROWS:MOVE  ENTER:SELECT  ESC:EXIT", C_GREY, C_BARBG);
+		RenderDrivePopup();
+	else if (mode == CONFIRM_REPLACE)
+		RenderConfirmPopup();
 }
+
+// CoCo Byte Club logo, 91x12, one bit per pixel in XBM order (LSB first,
+// 12 bytes a row).
+#define LOGO_W         91
+#define LOGO_H         12
+#define LOGO_ROW_BYTES 12
+static const unsigned char logoCocoByte[LOGO_H * LOGO_ROW_BYTES] =
+{
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0xf0, 0x01, 0x1b, 0xf0, 0x01, 0x1b, 0xfe, 0xf9, 0x7c, 0xff, 0xfd, 0x03,
+	0xf8, 0x83, 0x3b, 0xf8, 0x83, 0x3b, 0xfe, 0xfb, 0x7c, 0xff, 0xfd, 0x03,
+	0xfc, 0xc7, 0x7b, 0xfc, 0xc7, 0x7b, 0xfe, 0xfb, 0x7c, 0xff, 0xfd, 0x03,
+	0xfe, 0xef, 0xfb, 0xfe, 0xef, 0xfb, 0xf0, 0xfb, 0x7f, 0xff, 0x7d, 0x00,
+	0xfe, 0xe1, 0xfb, 0xfe, 0xe1, 0xfb, 0xfe, 0xfb, 0x7f, 0x7c, 0xfc, 0x03,
+	0x7e, 0xe0, 0xfb, 0x7e, 0xe0, 0xfb, 0xfe, 0xf1, 0x3f, 0x7c, 0xfc, 0x03,
+	0xfe, 0xe1, 0xfb, 0xfe, 0xe1, 0xfb, 0xfe, 0xe3, 0x1f, 0x7c, 0xfc, 0x03,
+	0xfe, 0xef, 0xfb, 0xfe, 0xef, 0xfb, 0xe0, 0xc3, 0x0f, 0x7c, 0x7c, 0x00,
+	0xfc, 0xc7, 0x7b, 0xfc, 0xc7, 0x7b, 0xfe, 0xc3, 0x0f, 0x7c, 0xfc, 0x07,
+	0xf8, 0x83, 0x3b, 0xf8, 0x83, 0x3b, 0xfe, 0xc3, 0x0f, 0x7c, 0xfc, 0x07,
+	0xf0, 0x01, 0x1b, 0xf0, 0x01, 0x1b, 0xfe, 0xc1, 0x0f, 0x7c, 0xfc, 0x07
+};
 
 // Version and credits. The font is uppercase-only, glyphs 0x20-0x5F, so every
 // string here stays inside that range.
@@ -536,18 +700,26 @@ void Supervisor::RenderAbout()
 	DrawChrome();
 	DrawBar(0, "                 ABOUT", C_WHITE, C_BARBG);
 
-	DrawRow(2, "        APPLE II EMULATOR FOR ESP32", C_WHITE, C_BG);
-	DrawRule(3);
+	// 5x2 screen pixels per logo pixel: about its own shape on this 640x200 mode
+	const int sx = 5, sy = 2;
+	int lx = (VGA_WIDTH - LOGO_W * sx) / 2;
+	for (int row = 0; row < LOGO_H; row++)
+		for (int col = 0; col < LOGO_W; col++)
+			if (logoCocoByte[row * LOGO_ROW_BYTES + (col >> 3)] & (1 << (col & 7)))
+				vga->fillRect(lx + col * sx, RowY(2) + row * sy, sx, sy, C_GREEN);
 
-	DrawText(2, 4, "MACHINE", C_YELLOW, C_BG);
-	DrawText(13, 4, machine->profile.name, C_WHITE, C_BG);
-	DrawText(2, 5, "CPU", C_YELLOW, C_BG);
-	DrawText(13, 5, machine->profile.cpu == CPU_65C02 ? "65C02" : "MOS 6502", C_WHITE, C_BG);
-	DrawText(2, 6, "DISPLAY", C_YELLOW, C_BG);
-	DrawText(13, 6, "640X200 VGA / 16 COLORS", C_WHITE, C_BG);
-	DrawText(2, 7, "KEYBOARD", C_YELLOW, C_BG);
-	DrawText(13, 7, GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name, C_WHITE, C_BG);
-	DrawText(2, 8, "SERIAL", C_YELLOW, C_BG);
+	DrawRow(6, "      APPLE II EMULATOR FOR ESP32", C_WHITE, C_BG);
+	DrawRule(7, SUP_ORIGIN_X, ColX(SCREENTEXT_X));   // clear of the margin stripe
+
+	DrawText(2, 8, "MACHINE", C_YELLOW, C_BG);
+	DrawText(13, 8, machine->profile.name, C_WHITE, C_BG);
+	DrawText(2, 9, "CPU", C_YELLOW, C_BG);
+	DrawText(13, 9, machine->profile.cpu == CPU_65C02 ? "65C02" : "MOS 6502", C_WHITE, C_BG);
+	DrawText(2, 10, "DISPLAY", C_YELLOW, C_BG);
+	DrawText(13, 10, "640X200 VGA / 16 COLORS", C_WHITE, C_BG);
+	DrawText(2, 11, "KEYBOARD", C_YELLOW, C_BG);
+	DrawText(13, 11, GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name, C_WHITE, C_BG);
+	DrawText(2, 12, "SERIAL", C_YELLOW, C_BG);
 	{
 		char line[32];
 		int slot = machine->device.SerialSlot();
@@ -555,27 +727,21 @@ void Supervisor::RenderAbout()
 			snprintf(line, sizeof(line), "SUPER SERIAL CARD, SLOT %d", slot);
 		else
 			snprintf(line, sizeof(line), "NONE");
-		DrawText(13, 8, line, C_WHITE, C_BG);
+		DrawText(13, 12, line, C_WHITE, C_BG);
 	}
-	DrawText(2, 9, "VERSION", C_YELLOW, C_BG);
+	DrawText(2, 13, "VERSION", C_YELLOW, C_BG);
 #if BUILD_TARGET == BUILD_TARGET_BOOTLOADER
-	DrawText(13, 9, FW_VERSION_STR " (SD BOOTLOADER)", C_WHITE, C_BG);
+	DrawText(13, 13, FW_VERSION_STR " (SD BOOTLOADER)", C_WHITE, C_BG);
 #else
-	DrawText(13, 9, FW_VERSION_STR, C_WHITE, C_BG);
+	DrawText(13, 13, FW_VERSION_STR, C_WHITE, C_BG);
 #endif
-	DrawText(2, 10, "BUILT", C_YELLOW, C_BG);
-	DrawText(13, 10, FW_BUILD_DATE, C_WHITE, C_BG);
+	DrawText(2, 14, "BUILT", C_YELLOW, C_BG);
+	DrawText(13, 14, FW_BUILD_DATE, C_WHITE, C_BG);
 
-	DrawText(2, 12, "CREDITS", C_YELLOW, C_BG);
-	DrawText(2, 13, "REINALDO TORRES / COCO BYTE CLUB", C_WHITE, C_BG);
-	DrawText(2, 14, "BASED ON CODESAFE", C_GREY, C_BG);
-	DrawText(4, 15, "ESP32-VGA_APPLEII_EMULATOR", C_GREY, C_BG);
-	DrawText(2, 16, "FABGL BY FABRIZIO DI VITTORIO", C_GREY, C_BG);
-	DrawText(2, 17, "CO-DEVELOPED WITH CLAUDE CODE", C_GREY, C_BG);
-	DrawText(2, 18, "MIT LICENSE", C_GREY, C_BG);
-
-	DrawText(2, 19, "GITHUB.COM/REYCO2000/", C_DIMCYAN, C_BG);
-	DrawText(4, 20, "ESP32-TTGO-VGA_APPLEII_EMULATOR", C_DIMCYAN, C_BG);
+	DrawCentered(16, "CREDITS", C_YELLOW, C_BG);
+	DrawCentered(17, "REINALDO TORRES & CLAUDE CODE", C_WHITE, C_BG);
+	DrawCentered(18, "COCOBYTE CLUB", C_WHITE, C_BG);
+	DrawCentered(19, "CODESAFE ESP32-VGA_APPLEII_EMULATOR", C_GREY, C_BG);
 
 	DrawBar(23, "           PRESS ESC TO RETURN", C_GREY, C_BARBG);
 }
@@ -760,8 +926,7 @@ void Supervisor::ButtonHint(int btn)
 			SetStatus("RESET THE EMULATED MACHINE");
 			break;
 		case BTN_MACHINE:
-			snprintf(msg, sizeof(msg), "MACHINE: %s", machine->profile.name);
-			SetStatus(msg);
+			SetStatus("CHOOSE THE MACHINE MODEL");
 			break;
 		case BTN_KEYBOARD:
 			snprintf(msg, sizeof(msg), "KEYBOARD: %s",
@@ -870,14 +1035,54 @@ void Supervisor::Select()
 				machine->UnmountHardDisk();
 				SetStatus("HARD DISK EJECTED");
 			}
-			else if (machine->MountHardDisk(pickPath))
-				SetStatus("HARD DISK MOUNTED (PICK AGAIN TO EJECT)");
+			else if (machine->device.hdd7.HasImage())
+			{
+				pickDrive = -1;
+				popupCursor = 1;             // CANCEL: Enter twice must not replace
+				mode = CONFIRM_REPLACE;
+			}
 			else
-				SetStatus("LOAD FAILED");
+				MountHardDisk();
 			return;
 		}
+		popupCursor = 0;
 		mode = PICK_DRIVE;
 	}
+}
+
+// A drive that already holds a disk asks before giving it up.
+void Supervisor::ChooseDrive(int drive)
+{
+	if (machine->device.HasFloppy(drive))
+	{
+		pickDrive = drive;
+		popupCursor = 1;                     // CANCEL: Enter twice must not replace
+		mode = CONFIRM_REPLACE;
+	}
+	else
+		MountTo(drive);
+}
+
+// Back to the drive popup, where the other drive can still be picked; a hard
+// disk had no popup to go back to.
+void Supervisor::LeaveConfirm()
+{
+	if (pickDrive < 0)
+		mode = BROWSE;
+	else
+	{
+		popupCursor = pickDrive;
+		mode = PICK_DRIVE;
+	}
+}
+
+void Supervisor::MountHardDisk()
+{
+	mode = BROWSE;
+	if (machine->MountHardDisk(pickPath))
+		SetStatus("HARD DISK MOUNTED (PICK AGAIN TO EJECT)");
+	else
+		SetStatus("LOAD FAILED");
 }
 
 void Supervisor::MountTo(int drive)
