@@ -46,11 +46,29 @@ private:
 	bool requested;
 	bool bootNoteShown;                  // the boot fallback note is said once
 
+	// SD directory shown in the disk manager. The entries live in PSRAM,
+	// allocated the first time the disk manager opens.
+	SupEntry* entries;
+	int entryCount;
+	const char* listError;               // shown in place of the list, NULL = none
+	char curPath[SUP_PATH_LEN];
+
 	int  MainMenu(int selected);
 	void DrawMain(int selected);
 	void AboutScreen();
-	void DiskMenu();
 	void SetupMenu();
+
+	void DiskMenu();
+	bool AtRoot() { return curPath[1] == '\0'; }
+	void ScanDir();
+	int  ListCount();
+	void ListLabel(int index, char* out, int outlen);
+	void DrawDriveButton(int btn, bool focused);
+	void DrawListRow(int index, int top, bool hl);
+	const char* DriveImage(int btn, char* buf, int buflen);
+	bool Activate(int index);            // Enter on a list row; true = directory changed
+	void MountDialog(const char* path);
+	void UnmountDialog(int btn);
 };
 
 #endif

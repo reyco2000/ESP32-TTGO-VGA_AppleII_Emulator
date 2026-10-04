@@ -44,6 +44,10 @@ Supervisor::Supervisor(Apple2Machine* m)
 	machine = m;
 	requested = false;
 	bootNoteShown = false;
+	entries = NULL;
+	entryCount = 0;
+	listError = NULL;
+	strcpy(curPath, "/");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -298,8 +302,408 @@ void Supervisor::AboutScreen()
 //////////////////////////////////////////////////////////////////////////
 // Disk manager
 
+// Drive buttons across the top, the SD card's folders and disk images below.
+
+#define DRIVE_COUNT     3                // D1, D2 and the hard disk in slot 7
+#define DRIVE_HD        2
+#define DRIVE_BTN_W     168
+#define DRIVE_BTN_H     36
+#define DRIVE_BTN_PITCH 176
+#define DRIVE_NAME_COLS 12               // 6x8 font at double width
+#define DISK_LIST_Y     (HEAD_Y + DRIVE_BTN_H + 4)
+#define DISK_LIST_ROWS  ((HINT_Y - 4 - DISK_LIST_Y) / LIST_ROW_H)
+
+static const char* const driveLabels[DRIVE_COUNT] = { "D1", "D2", "HD" };
+
+// file name without its directory
+static const char* BaseName(const char* path)
+{
+	const char* p = strrchr(path, '/');
+	return p ? p + 1 : path;
+}
+
+static int compareEntries(const void* a, const void* b)
+{
+	const SupEntry* ea = (const SupEntry*)a;
+	const SupEntry* eb = (const SupEntry*)b;
+	if (ea->isDir != eb->isDir)
+		return ea->isDir ? -1 : 1;          // directories first
+	return strcasecmp(ea->name, eb->name);
+}
+
+// Reads curPath into entries. On failure listError says why and the list is
+// empty; a folder that has gone (the card was swapped) falls back to the root.
+void Supervisor::ScanDir()
+{
+	entryCount = 0;
+	listError = NULL;
+	if (!entries)
+		entries = (SupEntry*)heap_caps_calloc(SUP_MAX_ENTRIES, sizeof(SupEntry), MALLOC_CAP_SPIRAM);
+	if (!entries)
+	{
+		listError = "(out of memory for the file list)";
+		return;
+	}
+
+	File root = SD.open(curPath);
+	if ((!root || !root.isDirectory()) && !AtRoot())
+	{
+		if (root)
+			root.close();
+		strcpy(curPath, "/");
+		root = SD.open(curPath);
+	}
+	if (!root || !root.isDirectory())
+	{
+		if (root)
+			root.close();
+		listError = "(SD card error)";
+		return;
+	}
+
+	for (File file = root.openNextFile(); file && entryCount < SUP_MAX_ENTRIES; file = root.openNextFile())
+	{
+		const char* name = file.name();
+		// hidden entries, and names too long for an entry, are left out
+		if (name[0] == '.' || strlen(name) >= SUP_NAME_LEN)
+			continue;
+		bool isDir = file.isDirectory();
+		if (!isDir && DskImage::TypeFromPath(name) == DskImage::IMAGE_NONE)
+			continue;
+		strcpy(entries[entryCount].name, name);
+		entries[entryCount].isDir = isDir;
+		entryCount++;
+	}
+	root.close();
+
+	qsort(entries, entryCount, sizeof(SupEntry), compareEntries);
+	if (entryCount == 0 && AtRoot())
+		listError = "(no disk images on the SD card)";
+}
+
+// rows of the list: ".." below the root, then the entries
+int Supervisor::ListCount()
+{
+	if (listError)
+		return 0;
+	return (AtRoot() ? 0 : 1) + entryCount;
+}
+
+void Supervisor::ListLabel(int index, char* out, int outlen)
+{
+	if (!AtRoot())
+	{
+		if (index == 0)
+		{
+			snprintf(out, outlen, "..  (up one level)");
+			return;
+		}
+		index--;
+	}
+	snprintf(out, outlen, entries[index].isDir ? "%s/" : "%s", entries[index].name);
+}
+
+// path of the image in a drive, "" when it is empty
+const char* Supervisor::DriveImage(int btn, char* buf, int buflen)
+{
+	if (btn == DRIVE_HD)
+		snprintf(buf, buflen, "%s", machine->device.hdd7.ImageName());
+	else
+		snprintf(buf, buflen, "%s", machine->device.GetDiskName(btn).c_str());
+	return buf;
+}
+
+// Icon (grey when the drive is empty), drive name, and the image's name on
+// two short lines without its extension.
+void Supervisor::DrawDriveButton(int btn, bool focused)
+{
+	fabgl::Canvas& cv = Canvas;
+	int x = BOX_X + 12 + btn * DRIVE_BTN_PITCH, y = HEAD_Y;
+	char path[SUP_PATH_LEN];
+	bool mounted = DriveImage(btn, path, sizeof(path))[0] != '\0';
+	fabgl::RGB888 bg = focused ? T_ACCENT : T_TEXT;
+	fabgl::RGB888 fg = focused ? T_TEXT : T_BG;
+
+	FillBox(cv, bg, x, y, x + DRIVE_BTN_W - 1, y + DRIVE_BTN_H - 1);
+	cv.setPenColor(focused ? T_TEXT : T_ACCENT);
+	for (int i = 0; i < (focused ? 4 : 2); i++)
+		cv.drawRectangle(x + i, y + i / 2, x + DRIVE_BTN_W - 1 - i, y + DRIVE_BTN_H - 1 - i / 2);
+
+	DrawSmallIcon(cv, btn == DRIVE_HD ? ICON_HDD : ICON_DISK, x + 10, y + 4, fg, bg, !mounted);
+
+	cv.setBrushColor(bg);
+	cv.setPenColor(fg);
+	Text(cv, &fabgl::FONT_8x8, x + 52, y + 6, driveLabels[btn]);
+
+	char line1[DRIVE_NAME_COLS + 1], line2[DRIVE_NAME_COLS + 1];
+	if (mounted)
+		SplitName(path, DRIVE_NAME_COLS, line1, line2);
+	else
+	{
+		strcpy(line1, "empty");
+		line2[0] = '\0';
+	}
+	cv.setPenColor(mounted ? fg : T_GREY);
+	Text(cv, &fabgl::FONT_6x8, x + 10, y + 17, line1);
+	if (line2[0])
+		Text(cv, &fabgl::FONT_6x8, x + 10, y + 26, line2);
+}
+
+void Supervisor::DrawListRow(int index, int top, bool hl)
+{
+	Row row;
+	row.value[0] = 0;
+	row.dim = false;
+	ListLabel(index, row.label, sizeof(row.label));
+	DrawRowAt(Canvas, LIST_X, DISK_LIST_Y + (index - top) * LIST_ROW_H, LIST_W, 8, true, row, hl, T_BG);
+}
+
+// the mount popup's rows: each floppy drive and what it holds, then Cancel
+static Apple2Machine* popupMachine;
+
+static void MountRow(int idx, Row& row)
+{
+	if (idx >= 2)
+	{
+		strcpy(row.label, "Cancel");
+		return;
+	}
+	strcpy(row.label, driveLabels[idx]);
+	std::string path = popupMachine->device.GetDiskName(idx);
+	if (path.empty())
+		strcpy(row.value, "(empty)");
+	else
+	{
+		char unused[2];
+		SplitName(path.c_str(), 20, row.value, unused);
+	}
+}
+
+// Asks which drive takes a floppy image; a hard disk image has only slot 7 to
+// go to. Asks again before replacing a disk or mounting an image twice.
+void Supervisor::MountDialog(const char* path)
+{
+	char m1[40], m2[40], unused[2];
+	const char* name = BaseName(path);
+
+	if (HardDiskCard::IsHardDiskImage(path))
+	{
+		const char* cur = machine->device.hdd7.ImageName();
+		if (strcmp(cur, path) == 0)
+		{
+			Notice("Hard disk", "Already mounted on HD.", nullptr);
+			return;
+		}
+		if (cur[0])
+		{
+			SplitName(cur, 27, m2, unused);
+			if (!Confirm("Replace disk?", "HD already has a disk:", m2))
+				return;
+		}
+		if (machine->MountHardDisk(path))
+			Trace("disks: mounted %s on HD\n", name);
+		else
+			Notice("Mount failed", "Could not load the image:", name);
+		return;
+	}
+
+	int first = 0;
+	for (int d = 1; d >= 0; d--)
+		if (!machine->device.HasFloppy(d))
+			first = d;
+	popupMachine = machine;
+	int drive = Popup("Mount disk on", name, nullptr, 3, MountRow, first);
+	if (drive < 0 || drive >= 2)
+		return;
+
+	std::string cur = machine->device.GetDiskName(drive);
+	if (cur == path)
+		return;                              // already there
+	if (!cur.empty())
+	{
+		snprintf(m1, sizeof(m1), "%s already has a disk:", driveLabels[drive]);
+		SplitName(cur.c_str(), 27, m2, unused);
+		if (!Confirm("Replace disk?", m1, m2))
+			return;
+	}
+	else if (machine->device.GetDiskName(1 - drive) == path)
+	{
+		snprintf(m1, sizeof(m1), "Already mounted on %s.", driveLabels[1 - drive]);
+		snprintf(m2, sizeof(m2), "Mount on %s as well?", driveLabels[drive]);
+		if (!Confirm("Mount again?", m1, m2))
+			return;
+	}
+	if (machine->Mount(path, drive))
+		Trace("disks: mounted %s on %s\n", name, driveLabels[drive]);
+	else
+		Notice("Mount failed", "Could not load the image:", name);
+}
+
+void Supervisor::UnmountDialog(int btn)
+{
+	char path[SUP_PATH_LEN], m1[40], m2[40], unused[2];
+	if (!DriveImage(btn, path, sizeof(path))[0])
+		return;
+	snprintf(m1, sizeof(m1), "Unmount %s?", driveLabels[btn]);
+	SplitName(path, 27, m2, unused);
+	if (!Confirm("Unmount disk", m1, m2))
+		return;
+	if (btn == DRIVE_HD)
+		machine->UnmountHardDisk();
+	else
+		machine->Unmount(btn);
+	Trace("disks: unmounted %s\n", driveLabels[btn]);
+}
+
+bool Supervisor::Activate(int index)
+{
+	if (!AtRoot())
+	{
+		if (index == 0)
+		{
+			// up one level
+			char* p = strrchr(curPath, '/');
+			if (p == curPath)
+				curPath[1] = '\0';           // back at the root: keep "/"
+			else
+				*p = '\0';
+			ScanDir();
+			return true;
+		}
+		index--;
+	}
+	if (index >= entryCount)
+		return false;
+
+	char path[SUP_PATH_LEN];
+	int len = snprintf(path, sizeof(path), AtRoot() ? "/%s" : "%s/%s",
+	                   AtRoot() ? entries[index].name : curPath, entries[index].name);
+	if (len >= (int)sizeof(path))
+	{
+		Notice("Path too long", "This folder is nested too", "deep to open.");
+		return false;
+	}
+	if (entries[index].isDir)
+	{
+		strcpy(curPath, path);
+		ScanDir();
+		return true;
+	}
+	MountDialog(path);
+	return false;
+}
+
 void Supervisor::DiskMenu()
 {
+	fabgl::Canvas& cv = Canvas;
+	ScanDir();
+	int btn = 0, sel = 0, top = 0;
+	bool inDrives = (ListCount() == 0);      // focus: drive buttons or file list
+	bool full = true;                        // repaint the whole screen
+	int pBtn = -1, pSel = -1, pTop = -1;
+	bool pIn = false;
+
+	while (!closeAll)
+	{
+		int count = ListCount();
+		if (full)
+		{
+			DrawFrame(cv, "Disk Manager", "Arrows   TAB Drives/Files   ENTER   ESC Back");
+			pBtn = pSel = pTop = -1;
+		}
+		// buttons: every one on a full repaint, else the ones whose focus changed
+		for (int b = 0; b < DRIVE_COUNT; b++)
+		{
+			bool now = inDrives && b == btn;
+			bool was = pIn && b == pBtn;
+			if (full || now != was)
+				DrawDriveButton(b, now);
+		}
+		// list: all of it when it scrolled, else the two rows the cursor touched
+		if (full || top != pTop)
+		{
+			FillBox(cv, T_BG, LIST_X, DISK_LIST_Y, LIST_X + LIST_W - 1,
+			        DISK_LIST_Y + DISK_LIST_ROWS * LIST_ROW_H - 1);
+			for (int r = 0; r < DISK_LIST_ROWS && top + r < count; r++)
+				DrawListRow(top + r, top, !inDrives && top + r == sel);
+			if (listError)
+			{
+				cv.setBrushColor(T_BG);
+				cv.setPenColor(T_GREY);
+				Text(cv, &fabgl::FONT_8x8, LIST_X + 8, DISK_LIST_Y, listError);
+			}
+			DrawScrollbar(cv, DISK_LIST_Y, DISK_LIST_ROWS * LIST_ROW_H, top, DISK_LIST_ROWS, count);
+		}
+		else if (count > 0 && (sel != pSel || inDrives != pIn))
+		{
+			if (pSel != sel && pSel >= top && pSel < top + DISK_LIST_ROWS)
+				DrawListRow(pSel, top, false);
+			DrawListRow(sel, top, !inDrives);
+		}
+		cv.waitCompletion();
+		full = false;
+		pBtn = btn; pSel = sel; pTop = top; pIn = inDrives;
+
+		if (inDrives)
+		{
+			char path[SUP_PATH_LEN];
+			DriveImage(btn, path, sizeof(path));
+			Trace("disks: [%s] %s\n", driveLabels[btn], path[0] ? BaseName(path) : "(empty)");
+		}
+		else
+		{
+			char label[SUP_NAME_LEN + 4];
+			ListLabel(sel, label, sizeof(label));
+			Trace("disks: file %s\n", label);
+		}
+
+		SupKey key = WaitKey();
+		if (key == K_ESC)
+			return;
+		if (key == K_F1)
+		{
+			closeAll = true;
+			return;
+		}
+
+		if (inDrives)
+		{
+			switch (key)
+			{
+				case K_LEFT:  if (btn > 0) btn--; break;
+				case K_RIGHT: if (btn < DRIVE_COUNT - 1) btn++; break;
+				case K_DOWN:
+				case K_TAB:   if (count > 0) inDrives = false; break;
+				case K_ENTER: UnmountDialog(btn); full = true; break;
+				default: break;
+			}
+		}
+		else
+		{
+			switch (key)
+			{
+				case K_UP:
+					if (sel > 0)
+						ListMove(key, count, DISK_LIST_ROWS, sel, top);
+					else
+						inDrives = true;
+					break;
+				case K_TAB:
+					inDrives = true;
+					break;
+				case K_ENTER:
+					if (Activate(sel))
+						sel = top = 0;
+					if (ListCount() == 0)
+						inDrives = true;
+					full = true;
+					break;
+				default:
+					ListMove(key, count, DISK_LIST_ROWS, sel, top);
+					break;
+			}
+		}
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////
