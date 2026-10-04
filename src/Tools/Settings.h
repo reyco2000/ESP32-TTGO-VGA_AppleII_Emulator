@@ -158,6 +158,28 @@ public:
 		return ok;
 	}
 
+	// Menu trace on the serial port, and terminal keys for the menu from it.
+	static bool LoadDebug(bool def)
+	{
+		Preferences p;
+		if (!p.begin(NS, true))
+			return def;
+		bool on = p.getBool("debug", def);
+		p.end();
+		return on;
+	}
+
+	// false when NVS could not be written
+	static bool SaveDebug(bool on)
+	{
+		Preferences p;
+		if (!p.begin(NS, false))
+			return false;
+		bool ok = p.putBool("debug", on) == 1;
+		p.end();
+		return ok;
+	}
+
 	// Hard disk image in slot 7, "" when none: saved across a machine switch
 	static String LoadHardDisk()
 	{
