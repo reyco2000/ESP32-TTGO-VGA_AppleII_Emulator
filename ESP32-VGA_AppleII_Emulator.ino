@@ -308,6 +308,10 @@ static void WaitMicros(uint32_t us)
 static bool SerialMenuKey()
 {
     static SerialKeyDecoder decoder;
+    static uint32_t lastByte = 0;
+    // a sequence cut short long ago must not pair up with this byte
+    decoder.Idle(millis() - lastByte);
+    lastByte = millis();
     while (Serial.available())
         if (decoder.Feed((uint8_t)Serial.read()) == K_F1)
             return true;

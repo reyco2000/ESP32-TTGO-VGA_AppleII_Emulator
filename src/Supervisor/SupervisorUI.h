@@ -20,21 +20,28 @@
 #include "fabgl.h"
 #include "SupervisorLogic.h"
 
-// Theme. The framebuffer holds indices into the Apple's 16 lores colours and
-// the menu leaves that palette alone, so the Apple picture around the box
-// keeps its colours. These are entries of applePalette (AppleVideo.cpp),
-// by value, which FabGL maps back to the same index.
-#define T_BG      fabgl::RGB888(0, 0, 0)         // 0  black: box, lists
-#define T_TEXT    fabgl::RGB888(255, 255, 255)   // 15 white: text, tiles, popups
-#define T_ACCENT  fabgl::RGB888(28, 116, 205)    // 2  dark blue: selection, borders
-#define T_GREY    fabgl::RGB888(158, 151, 143)   // 10
-#define T_DKGREY  fabgl::RGB888(137, 130, 122)   // 5
-#define T_GREEN   fabgl::RGB888(144, 192, 49)    // 12
-#define T_YELLOW  fabgl::RGB888(255, 253, 166)   // 13
-#define T_ORANGE  fabgl::RGB888(234, 108, 21)    // 9
-#define T_RED     fabgl::RGB888(226, 57, 86)     // 1
-#define T_VIOLET  fabgl::RGB888(126, 110, 173)   // 3
-#define T_BLUE    fabgl::RGB888(86, 168, 228)    // 6
+// Theme. The framebuffer holds 4-bit indices into one 16-entry palette that
+// the menu shares with the paused Apple picture around its box. While the
+// menu is open that palette is menuPalette (SupervisorUI.cpp): the Apple's
+// lores colours with nine entries changed, among them the six a hires
+// picture uses, which become the Apple logo's stripe colours. The DAC has two
+// bits a channel, so what is displayed is the nearest of 64 colours.
+//
+// Only these colours may be drawn. FabGL's colour lookup is crude (see
+// LoadPalette) and menuPalette is arranged so that exactly these resolve to
+// an entry of their own colour; the debug trace reports any that do not.
+#define T_INK     fabgl::RGB888(0, 0, 0)         // black: text on white, icon detail
+#define T_BG      fabgl::RGB888(28, 116, 205)    // blue: box, lists
+#define T_TEXT    fabgl::RGB888(255, 255, 255)   // white: text, tiles, popups
+#define T_ACCENT  fabgl::RGB888(0, 0, 170)       // navy: selection, borders
+#define T_DIM     fabgl::RGB888(159, 210, 213)   // pale aqua: hints, disabled rows, icon detail
+#define T_GREY    fabgl::RGB888(137, 130, 122)   // the one grey
+#define T_GREEN   fabgl::RGB888(107, 182, 74)    // Pantone 368
+#define T_YELLOW  fabgl::RGB888(253, 185, 36)    // Pantone 123
+#define T_ORANGE  fabgl::RGB888(242, 101, 34)    // Pantone 165
+#define T_RED     fabgl::RGB888(227, 27, 35)     // Pantone 186
+#define T_VIOLET  fabgl::RGB888(158, 40, 181)    // Pantone 253
+#define T_BLUE    fabgl::RGB888(0, 160, 223)     // Pantone 299
 
 // Layout, in framebuffer pixels: 640x200, each pixel 2.4 times taller than
 // wide. Text is drawn at double width, 16 pixels a character (12 for hints).
@@ -78,7 +85,9 @@ extern bool debugOn;         // gates Trace and the serial keys
 extern bool serialKeys;      // false while the Super Serial Card owns the port
 extern bool closeAll;        // F1 pressed: leave every menu level
 
-void   Begin(fabgl::Keyboard* keyboard);     // on opening the menu
+void   Begin(fabgl::Keyboard* keyboard);     // on opening the menu: palette, keys
+void   TracePixels();                        // palette indices on screen, for checking
+void   FlushSerialKeys();                    // when the serial keys are switched on
 SupKey WaitKey();                            // blocks until a key the menu knows
 void   Trace(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 

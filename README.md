@@ -69,7 +69,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 - Text (40 and 80 columns), lores and hires, drawn on a 640×200 16-colour VGA picture using standard 640×480 @ 60 Hz timing (double hi-res is written but not yet verified — see TODO)
 - **Two emulated Disk II drives** that take 140K sector images (`.dsk` / `.do` in DOS 3.3 order, `.po` in ProDOS order) and nibblized `.nib` images. What programs write to a disk is saved back to its image on the SD card when the drive stops or the disk is ejected — keep copies of images you care about
 - **ProDOS hard disks** (`.hdv`, ProDOS-order `.2mg`, and `.po` images bigger than 140K, up to 32 MB) in slot 7, read and written a block at a time straight from the SD card. A mounted hard disk boots before the floppies
-- **Supervisor menu (F1)**: pauses emulation and opens a colour on-screen SD card browser — navigate subdirectories, mount/unmount disk images into Drive 1 or Drive 2, reset the machine, switch between the ][+ and the //e with **MACHINE**, pick the keyboard layout with **KEYBOARD**, put a Super Serial Card in a slot with **SERIAL**, or open **ABOUT** for the firmware version and credits. The arrow keys move between the buttons and the file list. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
+- **Supervisor menu (F1)**: pauses emulation and opens a menu of icon tiles over the Apple's picture. **Disks** is the drive manager: buttons for drive 1, drive 2 and the hard disk above an SD card browser that walks subdirectories. **Setup** switches between the ][+ and the //e, picks the keyboard layout, puts a Super Serial Card in a slot, and sets the speed. **Reset**, **About** (firmware version and credits) and **Resume** complete the grid. Mounting never resets, so mid-game disk swaps work (multi-disk games like Ultima).
 - **Joystick from a PS/2 mouse**: a mouse in the board's second PS/2 jack is the Apple II joystick — the two paddles (`PDL(0)`/`PDL(1)`) follow the mouse, and its left and right buttons are pushbuttons 0 and 1 (see [Joystick](#joystick))
 - **Runs standalone or under [ESP32_Bootloader](https://github.com/ESP-WORKS/ESP32_Bootloader)**: flash it on its own over USB, or put it on the SD card as one entry in the bootloader's multi-emulator menu. Every release ships both builds (see [ESP32_Bootloader](#esp32_bootloader-sd-card-menu))
 - **Super Serial Card** in slot 1 or 2, wired to the board's USB serial port: a terminal, a printer, or both at once with a capture file on the SD card (see [Super Serial Card](#super-serial-card))
@@ -227,12 +227,12 @@ The //e system ROM is often found as two 8K halves; join them in this order:
 cat 342-0304-a.e10 342-0303-a.e8 > apple2e_enhanced.rom
 ```
 
-Each file must be exactly the size shown. The serial log prints the CRC32 of every ROM it loads, so a dump can be checked against a known-good one. If the //e files are missing, the **MACHINE** picker shows which one it needs, and a //e saved as the startup machine falls back to the ][+ with a note in the F1 menu.
+Each file must be exactly the size shown. The serial log prints the CRC32 of every ROM it loads, so a dump can be checked against a known-good one. If the //e files are missing, **Setup > Machine** marks the model "needs ROM" and names the missing file when it is chosen, and a //e saved as the startup machine falls back to the ][+ with a note in the F1 menu.
 
 ## Usage
 
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
-- Press **F1** to open the supervisor menu: arrow keys to move between the buttons and the file list, **Enter** to press a button, open a directory or select a disk image (a window then asks for **DRIVE 1** or **DRIVE 2**, and asks again before replacing a disk already there; a hard disk image mounts in slot 7, and picking the mounted one again ejects it), **ESC** to resume emulation. **ABOUT** shows the machine, CPU, firmware version and credits — **ESC** there returns to the browser rather than resuming.
+- Press **F1** to open the supervisor menu. The arrow keys move through the tiles and **Enter** opens one; **ESC** goes back one level and **F1** closes the menu from anywhere. In **Disks**, **Tab** (or Up from the first file) moves between the drive buttons **D1**, **D2**, **HD** and the file list. **Enter** on a disk image asks which drive takes it, and asks again before replacing a disk or mounting the same image twice; a hard disk image goes to **HD** (slot 7). **Enter** on a drive button that holds a disk asks to unmount it. Every confirmation starts on **No**.
 - **MACHINE** switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
 - **SERIAL** installs or removes the Super Serial Card, and turns the SD card capture file on and off (see [Super Serial Card](#super-serial-card)).
 - **KEYBOARD** picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
@@ -252,9 +252,9 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 
 ### Super Serial Card
 
-The **SERIAL** button in the F1 menu puts a Super Serial Card in **slot 1** or **slot 2**, or takes it out again. The choice is saved and comes back at the next boot; installing or removing the card takes effect at once, without a restart, and the Apple sees it at its next `PR#` or `IN#`.
+**Setup > Serial card** in the F1 menu puts a Super Serial Card in **slot 1** or **slot 2**, or takes it out again; **Setup > SD capture** turns the capture file on and off. The choice is saved and comes back at the next boot; installing or removing the card takes effect at once, without a restart, and the Apple sees it at its next `PR#` or `IN#`.
 
-The card is Apple's, and so is its firmware: put a 2,048-byte dump of the 341-0065 ROM in `/roms/ssc.rom`. Without it the slots in the picker are greyed out.
+The card is Apple's, and so is its firmware: put a 2,048-byte dump of the 341-0065 ROM in `/roms/ssc.rom`. Without it the menu says which file to copy instead of installing the card.
 
 Its serial line is the ESP32's USB port — the same cable the board is flashed and logged over, since every other pin on the TTGO VGA32 is taken by VGA, SD, PS/2 and audio. So **while the card is installed, the firmware's log goes quiet**: otherwise `Heap : ...` would appear in the middle of a listing. Take the card out to get the log back.
 
@@ -294,7 +294,7 @@ A mouse does not spring back to the middle like a joystick, so the stick stays w
 
 ### Keyboard layouts
 
-The keyboard starts on the US layout and can be switched in the F1 menu with the **KEYBOARD** button:
+The keyboard starts on the US layout and can be switched in the F1 menu under **Setup > Keyboard**:
 
 | Layout | Keyboard |
 |---|---|

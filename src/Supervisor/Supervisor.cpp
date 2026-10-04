@@ -51,6 +51,10 @@ Supervisor::Supervisor(Apple2Machine* m)
 	entryCount = 0;
 	listError = NULL;
 	strcpy(curPath, "/");
+	diskBtn = diskSel = diskTop = 0;
+	diskInDrives = false;
+	keyboard0 = speed0 = 0;
+	debug0 = false;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -74,7 +78,7 @@ static void DrawTile(fabgl::Canvas& cv, int idx, bool selected)
 	int x = TILE_X0 + (idx % TILE_COLS) * TILE_PITCH_X;
 	int y = TILE_Y0 + (idx / TILE_COLS) * TILE_PITCH_Y;
 	fabgl::RGB888 bg = selected ? T_ACCENT : T_TEXT;
-	fabgl::RGB888 fg = selected ? T_TEXT : T_BG;
+	fabgl::RGB888 fg = selected ? T_TEXT : T_INK;
 
 	FillBox(cv, bg, x, y, x + TILE_W - 1, y + TILE_H - 1);
 	// thin accent border; the selected tile gets a double white one. A side
@@ -108,6 +112,8 @@ int Supervisor::MainMenu(int selected)
 	if (selected < 0 || selected >= TILE_COUNT)
 		selected = 0;
 	DrawMain(selected);
+	Canvas.waitCompletion();
+	TracePixels();
 
 	int drawn = selected;
 	for (;;)
@@ -185,7 +191,8 @@ void Supervisor::Run()
 	SaveSettings();
 	if (reset)
 		machine->Reset();
-	Trace("menu: closed%s\n", reset ? ", reset" : "");
+	Trace("menu: closed%s, stack free %u\n", reset ? ", reset" : "",
+	      (unsigned)uxTaskGetStackHighWaterMark(NULL));
 	// the menu drew over the Apple's picture: have it repaint everything
 	machine->device.InvalidateRenderCache();
 }
@@ -194,15 +201,31 @@ void Supervisor::Run()
 // changed; NVS only has to remember them, and only when they moved.
 void Supervisor::SaveSettings()
 {
+	bool ok = true;
 	if (CurrentKeyboardLayoutId() != keyboard0)
-		Settings::SaveKeyboard(CurrentKeyboardLayoutId());
+	{
+		if (Settings::SaveKeyboard(CurrentKeyboardLayoutId()))
+			keyboard0 = CurrentKeyboardLayoutId();
+		else
+			ok = false;
+	}
 	if (machine->device.speedMode != speed0)
-		Settings::SaveSpeed(machine->device.speedMode);
+	{
+		if (Settings::SaveSpeed(machine->device.speedMode))
+			speed0 = machine->device.speedMode;
+		else
+			ok = false;
+	}
 	if (debugOn != debug0)
-		Settings::SaveDebug(debugOn);
-	keyboard0 = CurrentKeyboardLayoutId();
-	speed0 = machine->device.speedMode;
-	debug0 = debugOn;
+	{
+		if (Settings::SaveDebug(debugOn))
+			debug0 = debugOn;
+		else
+			ok = false;
+	}
+	// they stay in effect until power-off, but will not come back
+	if (!ok)
+		Notice("Not saved", "Cannot write settings (NVS).", "They last until power-off.");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -269,7 +292,7 @@ void Supervisor::AboutScreen()
 	int y = HEAD_Y + 16;
 	for (unsigned i = 0; i < sizeof(lines) / sizeof(lines[0]); i++, y += 10)
 	{
-		cv.setPenColor(i < 3 ? T_TEXT : T_GREY);
+		cv.setPenColor(i < 3 ? T_TEXT : T_DIM);
 		TextCentered(cv, &fabgl::FONT_6x8, BOX_X, BOX_W, y, lines[i]);
 	}
 	y += 1;
@@ -354,7 +377,7 @@ void Supervisor::ScanDir()
 		entries = (SupEntry*)heap_caps_calloc(SUP_MAX_ENTRIES, sizeof(SupEntry), MALLOC_CAP_SPIRAM);
 	if (!entries)
 	{
-		listError = "(out of memory for the file list)";
+		listError = "(no memory for the file list)";
 		return;
 	}
 
@@ -435,7 +458,7 @@ void Supervisor::DrawDriveButton(int btn, bool focused)
 	char path[SUP_PATH_LEN];
 	bool mounted = DriveImage(btn, path, sizeof(path))[0] != '\0';
 	fabgl::RGB888 bg = focused ? T_ACCENT : T_TEXT;
-	fabgl::RGB888 fg = focused ? T_TEXT : T_BG;
+	fabgl::RGB888 fg = focused ? T_TEXT : T_INK;
 
 	FillBox(cv, bg, x, y, x + DRIVE_BTN_W - 1, y + DRIVE_BTN_H - 1);
 	cv.setPenColor(focused ? T_TEXT : T_ACCENT);
@@ -485,17 +508,14 @@ static void MountRow(int idx, Row& row)
 	if (path.empty())
 		strcpy(row.value, "(empty)");
 	else
-	{
-		char unused[2];
-		SplitName(path.c_str(), 20, row.value, unused);
-	}
+		BaseTitle(path.c_str(), row.value, 20);
 }
 
 // Asks which drive takes a floppy image; a hard disk image has only slot 7 to
 // go to. Asks again before replacing a disk or mounting an image twice.
 void Supervisor::MountDialog(const char* path)
 {
-	char m1[40], m2[40], unused[2];
+	char m1[40], m2[40];
 	const char* name = BaseName(path);
 
 	if (HardDiskCard::IsHardDiskImage(path))
@@ -508,9 +528,10 @@ void Supervisor::MountDialog(const char* path)
 		}
 		if (cur[0])
 		{
-			SplitName(cur, 27, m2, unused);
+			BaseTitle(cur, m2, 27);
 			if (!Confirm("Replace disk?", "HD already has a disk:", m2))
 				return;
+			DrawDisk();                      // a popup may follow this one
 		}
 		if (machine->MountHardDisk(path))
 			Trace("disks: mounted %s on HD\n", name);
@@ -530,12 +551,15 @@ void Supervisor::MountDialog(const char* path)
 	std::string cur = machine->device.GetDiskName(drive);
 	if (cur == path)
 		return;                              // already there
+	// each popup goes over a clean screen, not over the one before it
+	DrawDisk();
 	if (!cur.empty())
 	{
 		snprintf(m1, sizeof(m1), "%s already has a disk:", driveLabels[drive]);
-		SplitName(cur.c_str(), 27, m2, unused);
+		BaseTitle(cur.c_str(), m2, 27);
 		if (!Confirm("Replace disk?", m1, m2))
 			return;
+		DrawDisk();
 	}
 	else if (machine->device.GetDiskName(1 - drive) == path)
 	{
@@ -543,6 +567,7 @@ void Supervisor::MountDialog(const char* path)
 		snprintf(m2, sizeof(m2), "Mount on %s as well?", driveLabels[drive]);
 		if (!Confirm("Mount again?", m1, m2))
 			return;
+		DrawDisk();
 	}
 	if (machine->Mount(path, drive))
 		Trace("disks: mounted %s on %s\n", name, driveLabels[drive]);
@@ -552,11 +577,11 @@ void Supervisor::MountDialog(const char* path)
 
 void Supervisor::UnmountDialog(int btn)
 {
-	char path[SUP_PATH_LEN], m1[40], m2[40], unused[2];
+	char path[SUP_PATH_LEN], m1[40], m2[40];
 	if (!DriveImage(btn, path, sizeof(path))[0])
 		return;
 	snprintf(m1, sizeof(m1), "Unmount %s?", driveLabels[btn]);
-	SplitName(path, 27, m2, unused);
+	BaseTitle(path, m2, 27);
 	if (!Confirm("Unmount disk", m1, m2))
 		return;
 	if (btn == DRIVE_HD)
@@ -604,67 +629,84 @@ bool Supervisor::Activate(int index)
 	return false;
 }
 
+// Frame, buttons and list: the first paint, and the repaint after a popup.
+void Supervisor::DrawDisk()
+{
+	fabgl::Canvas& cv = Canvas;
+	int count = ListCount();
+	DrawFrame(cv, "Disk Manager", "Arrows   TAB Drives/Files   ENTER   ESC Back");
+	for (int b = 0; b < DRIVE_COUNT; b++)
+		DrawDriveButton(b, diskInDrives && b == diskBtn);
+	for (int r = 0; r < DISK_LIST_ROWS && diskTop + r < count; r++)
+		DrawListRow(diskTop + r, diskTop, !diskInDrives && diskTop + r == diskSel);
+	if (listError)
+	{
+		cv.setBrushColor(T_BG);
+		cv.setPenColor(T_DIM);
+		Text(cv, &fabgl::FONT_8x8, LIST_X + 8, DISK_LIST_Y, listError);
+	}
+	DrawScrollbar(cv, DISK_LIST_Y, DISK_LIST_ROWS * LIST_ROW_H, diskTop, DISK_LIST_ROWS, count);
+}
+
 void Supervisor::DiskMenu()
 {
 	fabgl::Canvas& cv = Canvas;
 	ScanDir();
-	int btn = 0, sel = 0, top = 0;
-	bool inDrives = (ListCount() == 0);      // focus: drive buttons or file list
+	diskBtn = diskSel = diskTop = 0;
+	diskInDrives = (ListCount() == 0);
 	bool full = true;                        // repaint the whole screen
-	int pBtn = -1, pSel = -1, pTop = -1;
+	int pBtn = 0, pSel = 0, pTop = 0;        // what the last paint showed
 	bool pIn = false;
 
 	while (!closeAll)
 	{
 		int count = ListCount();
 		if (full)
+			DrawDisk();
+		else
 		{
-			DrawFrame(cv, "Disk Manager", "Arrows   TAB Drives/Files   ENTER   ESC Back");
-			pBtn = pSel = pTop = -1;
-		}
-		// buttons: every one on a full repaint, else the ones whose focus changed
-		for (int b = 0; b < DRIVE_COUNT; b++)
-		{
-			bool now = inDrives && b == btn;
-			bool was = pIn && b == pBtn;
-			if (full || now != was)
-				DrawDriveButton(b, now);
-		}
-		// list: all of it when it scrolled, else the two rows the cursor touched
-		if (full || top != pTop)
-		{
-			FillBox(cv, T_BG, LIST_X, DISK_LIST_Y, LIST_X + LIST_W - 1,
-			        DISK_LIST_Y + DISK_LIST_ROWS * LIST_ROW_H - 1);
-			for (int r = 0; r < DISK_LIST_ROWS && top + r < count; r++)
-				DrawListRow(top + r, top, !inDrives && top + r == sel);
-			if (listError)
+			// the buttons whose focus changed
+			for (int b = 0; b < DRIVE_COUNT; b++)
 			{
-				cv.setBrushColor(T_BG);
-				cv.setPenColor(T_GREY);
-				Text(cv, &fabgl::FONT_8x8, LIST_X + 8, DISK_LIST_Y, listError);
+				bool now = diskInDrives && b == diskBtn;
+				bool was = pIn && b == pBtn;
+				if (now != was)
+					DrawDriveButton(b, now);
 			}
-			DrawScrollbar(cv, DISK_LIST_Y, DISK_LIST_ROWS * LIST_ROW_H, top, DISK_LIST_ROWS, count);
-		}
-		else if (count > 0 && (sel != pSel || inDrives != pIn))
-		{
-			if (pSel != sel && pSel >= top && pSel < top + DISK_LIST_ROWS)
-				DrawListRow(pSel, top, false);
-			DrawListRow(sel, top, !inDrives);
+			// the list: all of it when it scrolled, else the rows the cursor touched
+			if (diskTop != pTop)
+			{
+				FillBox(cv, T_BG, LIST_X, DISK_LIST_Y, LIST_X + LIST_W - 1,
+				        DISK_LIST_Y + DISK_LIST_ROWS * LIST_ROW_H - 1);
+				for (int r = 0; r < DISK_LIST_ROWS && diskTop + r < count; r++)
+					DrawListRow(diskTop + r, diskTop, !diskInDrives && diskTop + r == diskSel);
+				DrawScrollbar(cv, DISK_LIST_Y, DISK_LIST_ROWS * LIST_ROW_H, diskTop, DISK_LIST_ROWS, count);
+			}
+			else if (count > 0 && (diskSel != pSel || diskInDrives != pIn))
+			{
+				if (pSel != diskSel)
+					DrawListRow(pSel, diskTop, false);
+				DrawListRow(diskSel, diskTop, !diskInDrives);
+			}
 		}
 		cv.waitCompletion();
 		full = false;
-		pBtn = btn; pSel = sel; pTop = top; pIn = inDrives;
+		pBtn = diskBtn; pSel = diskSel; pTop = diskTop; pIn = diskInDrives;
 
-		if (inDrives)
+		if (diskInDrives)
 		{
-			char path[SUP_PATH_LEN];
-			DriveImage(btn, path, sizeof(path));
-			Trace("disks: [%s] %s\n", driveLabels[btn], path[0] ? BaseName(path) : "(empty)");
+			char name[28];
+			name[0] = '\0';
+			if (diskBtn == DRIVE_HD)
+				BaseTitle(machine->device.hdd7.ImageName(), name, 27);
+			else
+				BaseTitle(machine->device.GetDiskName(diskBtn).c_str(), name, 27);
+			Trace("disks: [%s] %s\n", driveLabels[diskBtn], name[0] ? name : "(empty)");
 		}
-		else
+		else if (count > 0)
 		{
 			char label[SUP_NAME_LEN + 4];
-			ListLabel(sel, label, sizeof(label));
+			ListLabel(diskSel, label, sizeof(label));
 			Trace("disks: file %s\n", label);
 		}
 
@@ -677,15 +719,15 @@ void Supervisor::DiskMenu()
 			return;
 		}
 
-		if (inDrives)
+		if (diskInDrives)
 		{
 			switch (key)
 			{
-				case K_LEFT:  if (btn > 0) btn--; break;
-				case K_RIGHT: if (btn < DRIVE_COUNT - 1) btn++; break;
+				case K_LEFT:  if (diskBtn > 0) diskBtn--; break;
+				case K_RIGHT: if (diskBtn < DRIVE_COUNT - 1) diskBtn++; break;
 				case K_DOWN:
-				case K_TAB:   if (count > 0) inDrives = false; break;
-				case K_ENTER: UnmountDialog(btn); full = true; break;
+				case K_TAB:   if (count > 0) diskInDrives = false; break;
+				case K_ENTER: UnmountDialog(diskBtn); full = true; break;
 				default: break;
 			}
 		}
@@ -694,23 +736,23 @@ void Supervisor::DiskMenu()
 			switch (key)
 			{
 				case K_UP:
-					if (sel > 0)
-						ListMove(key, count, DISK_LIST_ROWS, sel, top);
+					if (diskSel > 0)
+						ListMove(key, count, DISK_LIST_ROWS, diskSel, diskTop);
 					else
-						inDrives = true;
+						diskInDrives = true;
 					break;
 				case K_TAB:
-					inDrives = true;
+					diskInDrives = true;
 					break;
 				case K_ENTER:
-					if (Activate(sel))
-						sel = top = 0;
+					if (Activate(diskSel))
+						diskSel = diskTop = 0;
 					if (ListCount() == 0)
-						inDrives = true;
+						diskInDrives = true;
 					full = true;
 					break;
 				default:
-					ListMove(key, count, DISK_LIST_ROWS, sel, top);
+					ListMove(key, count, DISK_LIST_ROWS, diskSel, diskTop);
 					break;
 			}
 		}
@@ -722,7 +764,7 @@ void Supervisor::DiskMenu()
 
 enum { SET_MACHINE, SET_KEYBOARD, SET_SERIAL, SET_CAPTURE, SET_SPEED, SET_DEBUG, SET_COUNT };
 
-static const char* const serialNames[3] = { "Not installed", "Slot 1 (printer)", "Slot 2 (terminal/modem)" };
+static const char* const serialNames[3] = { "Not installed", "Slot 1 (printer)", "Slot 2 (modem)" };
 
 static void SetupRow(int idx, Row& row)
 {
@@ -797,6 +839,8 @@ void Supervisor::SetupMenu()
 				break;
 			case SET_DEBUG:
 				debugOn = !debugOn;          // saved when the menu closes
+				if (debugOn)
+					FlushSerialKeys();
 				break;
 		}
 	}
@@ -816,7 +860,7 @@ static void MachineRow(int idx, Row& row)
 	else if (machineMissing[idx])
 	{
 		// a model whose ROMs are not in /roms cannot be picked
-		snprintf(row.value, sizeof(row.value), "needs %s", machineMissing[idx]);
+		strcpy(row.value, "needs ROM");
 		row.dim = true;
 	}
 }
@@ -835,8 +879,7 @@ void Supervisor::MachineMenu()
 	char msg[40];
 	if (machineMissing[id])
 	{
-		snprintf(msg, sizeof(msg), "Needs %s/%s", ROM_DIR, machineMissing[id]);
-		Notice("ROM missing", msg, "on the SD card.");
+		Notice("ROM missing", "Copy this file to " ROM_DIR ":", machineMissing[id]);
 		return;
 	}
 	snprintf(msg, sizeof(msg), "%s?", GetMachineProfile(id).name);
@@ -909,7 +952,7 @@ void Supervisor::SerialMenu()
 
 	if (slot && RomLoader::Check(SSC_ROM, SSC_ROM_SIZE) != ROM_OK)
 	{
-		Notice("ROM missing", "Needs " ROM_DIR "/" SSC_ROM, "on the SD card.");
+		Notice("ROM missing", "Copy this file to " ROM_DIR ":", SSC_ROM);
 		return;
 	}
 	if (!machine->SetSerialSlot(slot, Settings::LoadPrintCapture(false)))
@@ -918,6 +961,8 @@ void Supervisor::SerialMenu()
 		return;
 	}
 	serialKeys = (slot == 0);
+	if (serialKeys)
+		FlushSerialKeys();
 	if (!Settings::SaveSerial((uint8_t)slot))
 		Notice("Not saved", "Cannot write settings (NVS).", nullptr);
 }

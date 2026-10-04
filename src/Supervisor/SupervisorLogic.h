@@ -123,15 +123,16 @@ public:
 		return K_NONE;
 	}
 
-	// Call when no byte is waiting: K_ESC, once, when a lone ESC is 30 ms old
+	// Call when no byte is waiting. Once the last byte is 30 ms old a lone
+	// ESC is the key, reported once, and a sequence cut short is dropped
+	// rather than left to swallow whatever comes next.
 	SupKey Idle(uint32_t msSinceByte)
 	{
-		if (state == ESC && msSinceByte >= 30)
-		{
-			state = IDLE;
-			return K_ESC;
-		}
-		return K_NONE;
+		if (state == IDLE || msSinceByte < 30)
+			return K_NONE;
+		bool esc = (state == ESC);
+		state = IDLE;
+		return esc ? K_ESC : K_NONE;
 	}
 
 private:
@@ -166,6 +167,21 @@ inline void FitName(char* out, int room, const char* text)
 	}
 	else
 		memcpy(out, text, len + 1);
+}
+
+// A path's file name, without directory or extension, cut to room characters
+// with '~' last when it did not fit. out holds room + 1 bytes.
+inline void BaseTitle(const char* path, char* out, int room)
+{
+	const char* base = strrchr(path, '/');
+	base = base ? base + 1 : path;
+	const char* dot = strrchr(base, '.');
+	int len = (dot && dot != base) ? (int)(dot - base) : (int)strlen(base);
+	int n = len < room ? len : room;
+	memcpy(out, base, n);
+	out[n] = '\0';
+	if (len > room && room > 0)
+		out[room - 1] = '~';
 }
 
 // A path's file name, without directory or extension, on two lines of width

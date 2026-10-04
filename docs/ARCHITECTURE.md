@@ -301,15 +301,32 @@ whole screen on every keypress is visible as flicker. A move repaints the two
 tiles or rows the cursor left and reached; a list repaints fully only when it
 scrolls, and a screen only after a popup closed over it.
 
-### The supervisor draws in the Apple's palette
+### The palette has one owner at a time
 
-The framebuffer holds 4-bit indices into one 16-entry palette, and the Apple
-picture stays visible around the menu box. The supervisor therefore never loads
-a palette of its own: its theme colours in `SupervisorUI.h` are entries of
-`applePalette` (`AppleVideo.cpp`), repeated by value, which FabGL maps back to
-the same indices. A change to `applePalette` has to be mirrored there. The
-frame loop renders one Apple frame before `Run()`, so the palette is loaded
-even when the menu opens before the first emulated frame.
+The framebuffer holds 4-bit indices into one 16-entry palette, shared by the
+emulator and the supervisor, and the Apple picture stays visible around the
+menu box. On opening, the supervisor loads `menuPalette` (`SupervisorUI.cpp`):
+the Apple's lores colours with nine entries changed, among them the six a
+hires picture uses, which become the Apple logo's stripe colours. The paused
+picture therefore shifts slightly while the menu is up. On close,
+`InvalidateRenderCache()` makes `AppleVideo` load its own palette again, clear
+the border and repaint every cell. The frame loop renders one Apple frame
+before `Run()`, so there is a picture to draw over even when the menu opens
+before the first emulated frame.
+
+### Canvas colours need the lookup rebuilt, and it is crude
+
+FabGL resolves a colour drawn through `fabgl::Canvas` to a palette index with a
+table it builds once, from its own default palette; `setPaletteItem()` does not
+update it. `AppleVGAController::refreshColorLookup()` (`VGA.h`) rebuilds it and
+the supervisor calls it after loading its palette. The rebuild takes the first
+entry of the same hue whose saturation and brightness are within a wide margin,
+so with black at index 0 a light grey resolves to black, and white to the
+first grey. `menuPalette` is arranged so that each theme colour in
+`SupervisorUI.h` resolves to an entry of its own colour, and only those colours
+may be drawn. With the debug setting on, opening the menu prints
+`menu: palette ok` or names the colour that resolves wrongly, and
+`menu: pixels bg=2 stripes=12 13 9 1 3 6` read back from the framebuffer.
 
 ### The supervisor can be driven from the serial port
 

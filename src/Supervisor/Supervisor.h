@@ -57,6 +57,9 @@ private:
 	int entryCount;
 	const char* listError;               // shown in place of the list, NULL = none
 	char curPath[SUP_PATH_LEN];
+	// disk manager cursor: the focused drive button, the list row and scroll
+	int diskBtn, diskSel, diskTop;
+	bool diskInDrives;                   // focus is on the buttons, not the list
 
 	int  MainMenu(int selected);
 	void DrawMain(int selected);
@@ -71,6 +74,7 @@ private:
 	void ScanDir();
 	int  ListCount();
 	void ListLabel(int index, char* out, int outlen);
+	void DrawDisk();                     // the whole disk manager screen
 	void DrawDriveButton(int btn, bool focused);
 	void DrawListRow(int index, int top, bool hl);
 	const char* DriveImage(int btn, char* buf, int buflen);

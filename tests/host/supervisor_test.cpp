@@ -76,6 +76,11 @@ static void TestSerialKeys()
 	      && d.Feed('9') == K_NONE && d.Feed('9') == K_NONE && d.Feed('9') == K_NONE
 	      && d.Feed('\t') == K_TAB, "over-long sequence dropped");
 	check(d.Feed('x') == K_NONE && d.Feed(0xFF) == K_NONE, "noise ignored");
+	// a sequence cut short must not swallow the next key
+	check(d.Feed(0x1B) == K_NONE && d.Feed('[') == K_NONE && d.Idle(10) == K_NONE
+	      && d.Idle(30) == K_NONE && d.Feed('\r') == K_ENTER, "half CSI times out");
+	check(d.Feed(0x1B) == K_NONE && d.Feed('O') == K_NONE && d.Idle(30) == K_NONE
+	      && d.Feed('P') == K_NONE, "half SS3 times out: a late P is not F1");
 }
 
 static void TestNames()
@@ -95,6 +100,17 @@ static void TestNames()
 	check(!strcmp(a, "noext"), "no extension");
 	SplitName("", 10, a, b);
 	check(!a[0] && !b[0], "empty path");
+
+	// one line: the canary after the buffer must survive a long name
+	char t[12];
+	memset(t, '#', sizeof(t));
+	BaseTitle("/games/Prince of Persia (1989) Side A.dsk", t, 8);
+	check(!strcmp(t, "Prince ~"), "title cut to its room");
+	check(t[9] == '#' && t[10] == '#' && t[11] == '#', "title stays inside its buffer");
+	BaseTitle("/AppleII/dkk.nib", t, 8);
+	check(!strcmp(t, "dkk"), "short title, no directory or extension");
+	BaseTitle("", t, 8);
+	check(!t[0], "empty title");
 }
 
 int main()

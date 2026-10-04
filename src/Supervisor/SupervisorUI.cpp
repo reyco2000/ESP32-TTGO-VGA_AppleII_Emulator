@@ -8,12 +8,13 @@
  * ============================================================
  *  File   : SupervisorUI.cpp
  *  Module : Look and feel of the supervisor menu. Draws with
- *           FabGL's Canvas over the paused Apple picture, in the
- *           Apple's own palette: a black box with the six Apple
- *           logo stripes top and bottom, white tiles and popups,
- *           a dark blue selection bar. Reads the PS/2 keyboard
- *           and, with the debug setting on, terminal keys from
- *           the serial port, and traces each selection there.
+ *           FabGL's Canvas over the paused Apple picture, in a
+ *           palette of its own that stays close to the Apple's: a
+ *           blue box with the six Apple logo stripes top and
+ *           bottom, white tiles and popups, a navy selection bar.
+ *           Reads the PS/2 keyboard and, with the debug setting
+ *           on, terminal keys from the serial port, and traces
+ *           each selection there.
  * ============================================================
 */
 
@@ -21,6 +22,7 @@
 #include <stdarg.h>
 #include "SupervisorUI.h"
 #include "../Tools/Log.h"
+#include "../VGA/VGA.h"
 
 extern fabgl::Canvas Canvas;
 
@@ -36,18 +38,97 @@ static fabgl::Keyboard* kbd = nullptr;
 //////////////////////////////////////////////////////////////////////////
 // Keys and trace
 
+// The palette while the menu is open. It starts from the Apple's lores
+// colours (applePalette in AppleVideo.cpp), so the paused picture around the
+// box stays recognisable, and changes nine entries: 1, 3, 6, 9, 12 and 13
+// become the Apple logo's stripe colours, 7 the navy accent, and 4 and 10 a
+// pale aqua and a second white. AppleVideo loads its own palette again when
+// the menu closes (InvalidateRenderCache).
+//
+// The last three are where they are because of how FabGL resolves a Canvas
+// colour: it takes the first entry of the same hue whose saturation and
+// brightness are within a wide margin. With black first, any grey lighter
+// than (137,130,122) would resolve to black and white to that grey, so there
+// is one grey and a white ahead of the pink; a pale blue would resolve to
+// the navy, so the pale colour is an aqua, ahead of the Apple's own.
+static const uint8_t menuPalette[16][3] =
+{
+	{   0,   0,   0 }, { 227,  27,  35 }, {  28, 116, 205 }, { 158,  40, 181 },
+	{ 159, 210, 213 }, { 137, 130, 122 }, {   0, 160, 223 }, {   0,   0, 170 },
+	{ 151,  88,  34 }, { 242, 101,  34 }, { 255, 255, 255 }, { 255, 206, 240 },
+	{ 107, 182,  74 }, { 253, 185,  36 }, { 159, 210, 213 }, { 255, 255, 255 }
+};
+
+static void LoadPalette()
+{
+	for (int i = 0; i < 16; i++)
+		DisplayController.setPaletteItem(i, fabgl::RGB888(menuPalette[i][0], menuPalette[i][1], menuPalette[i][2]));
+	// Canvas colours go through FabGL's own lookup, see VGA.h
+	DisplayController.refreshColorLookup();
+
+	// every theme colour has to land on an entry that displays as itself
+	static const fabgl::RGB888 theme[] =
+	{
+		T_INK, T_BG, T_TEXT, T_ACCENT, T_DIM, T_DIM,
+		T_GREEN, T_YELLOW, T_ORANGE, T_RED, T_VIOLET, T_BLUE
+	};
+	bool ok = true;
+	for (unsigned t = 0; t < sizeof(theme) / sizeof(theme[0]); t++)
+	{
+		int i = DisplayController.paletteIndexOf(theme[t]);
+		fabgl::RGB888 shown(menuPalette[i][0], menuPalette[i][1], menuPalette[i][2]);
+		if (fabgl::RGB888toPackedRGB222(shown) != fabgl::RGB888toPackedRGB222(theme[t]))
+		{
+			Trace("menu: palette BAD: theme colour %u resolves to entry %d\n", t, i);
+			ok = false;
+		}
+	}
+	if (ok)
+		Trace("menu: palette ok\n");
+}
+
+// Reads the framebuffer back: the palette index of the box background and of
+// each stripe. With the lookup right these are 2 and 12 13 9 1 3 6.
+void TracePixels()
+{
+	if (!debugOn)
+		return;
+	int y = BOX_Y + 5;
+	int w = (BOX_W - 16) / 6;
+	int idx[7];
+	for (int i = 0; i < 7; i++)
+	{
+		int x = (i == 0) ? BOX_X + 4 : BOX_X + 8 + (i - 1) * w + w / 2;
+		int yy = (i == 0) ? BOX_Y + 20 : y;
+		uint8_t b = DisplayController.getScanline(yy)[x >> 1];
+		idx[i] = (x & 1) ? (b & 0x0F) : (b >> 4);
+	}
+	Trace("menu: pixels bg=%d stripes=%d %d %d %d %d %d\n",
+	      idx[0], idx[1], idx[2], idx[3], idx[4], idx[5], idx[6]);
+}
+
 void Begin(fabgl::Keyboard* keyboard)
 {
 	kbd = keyboard;
 	closeAll = false;
+	LoadPalette();
 	if (kbd)
 		kbd->emptyVirtualKeyQueue();
 }
 
+static SerialKeyDecoder decoder;
+static uint32_t lastByte = 0;
+
+// Bytes that reached the port while nobody was reading it are not keys.
+void FlushSerialKeys()
+{
+	while (Serial.available())
+		Serial.read();
+	decoder = SerialKeyDecoder();
+}
+
 SupKey WaitKey()
 {
-	static SerialKeyDecoder decoder;
-	static uint32_t lastByte = 0;
 	for (;;)
 	{
 		fabgl::VirtualKeyItem item;
@@ -135,18 +216,13 @@ void TextCentered(fabgl::Canvas& cv, const fabgl::FontInfo* font, int x, int w, 
 // the six bands of the Apple logo
 static void DrawStripes(fabgl::Canvas& cv, int y)
 {
-	static const uint8_t band[6][3] =
-	{
-		{ 144, 192, 49 }, { 255, 253, 166 }, { 234, 108, 21 },
-		{ 226, 57, 86 },  { 126, 110, 173 }, { 86, 168, 228 },
-	};
+	static const fabgl::RGB888 band[6] = { T_GREEN, T_YELLOW, T_ORANGE, T_RED, T_VIOLET, T_BLUE };
 	int x0 = BOX_X + 8, w = (BOX_W - 16) / 6;
 	for (int i = 0; i < 6; i++)
-		FillBox(cv, fabgl::RGB888(band[i][0], band[i][1], band[i][2]),
-		        x0 + i * w, y, x0 + (i + 1) * w - 1, y + STRIPE_H - 1);
+		FillBox(cv, band[i], x0 + i * w, y, x0 + (i + 1) * w - 1, y + STRIPE_H - 1);
 }
 
-// black box, stripes top and bottom, white title, key hints
+// blue box, stripes top and bottom, white title, key hints
 void DrawFrame(fabgl::Canvas& cv, const char* title, const char* hint)
 {
 	FillBox(cv, T_BG, BOX_X, BOX_Y, BOX_X + BOX_W - 1, BOX_Y + BOX_H - 1);
@@ -159,13 +235,14 @@ void DrawFrame(fabgl::Canvas& cv, const char* title, const char* hint)
 	cv.setBrushColor(T_BG);
 	cv.setPenColor(T_TEXT);
 	TextCentered(cv, &fabgl::FONT_8x14, BOX_X, BOX_W, TITLE_Y, title);
-	cv.setPenColor(T_GREY);
+	cv.setPenColor(T_DIM);
 	TextCentered(cv, &fabgl::FONT_6x8, BOX_X, BOX_W, HINT_Y, hint);
 }
 
 // One line: label on the left starting at x+textOff, value on the right. The
-// highlighted line is an accent bar with white text. bg is black in a list
-// and white in a popup; the text takes the opposite.
+// highlighted line is an accent bar with white text. bg is the box's blue in
+// a list, with white text and yellow values, and white in a popup, with black
+// text and accent values.
 void DrawRowAt(fabgl::Canvas& cv, int x, int y, int w, int textOff, bool compact,
                const Row& r, bool hl, fabgl::RGB888 bg)
 {
@@ -174,33 +251,44 @@ void DrawRowAt(fabgl::Canvas& cv, int x, int y, int w, int textOff, bool compact
 	int cols = (w - textOff - 8) / 16;
 	if (cols > 31) cols = 31;
 
-	fabgl::RGB888 fg = Same(bg, T_TEXT) ? T_BG : T_TEXT;
-	fabgl::RGB888 valueFg = T_ACCENT;
+	bool onWhite = Same(bg, T_TEXT);
+	fabgl::RGB888 fg = onWhite ? T_INK : T_TEXT;
+	fabgl::RGB888 valueFg = onWhite ? T_ACCENT : T_YELLOW;
 	if (hl)
 	{
 		bg = T_ACCENT;
 		fg = valueFg = T_TEXT;
 	}
 	else if (r.dim)
-		fg = T_GREY;
+		fg = onWhite ? T_GREY : T_DIM;
 
 	FillBox(cv, bg, x, y, x + w - 1, y + h - 1);
 	int ty = y + (h - font->height) / 2;
 
-	int vlen = strlen(r.value);
-	int room = cols - (vlen ? 1 : 0);
+	// Both in full when they fit. When they do not, the value keeps up to 16
+	// characters and the label what is left; either is cut with a '~'.
 	int llen = strlen(r.label);
-	if (llen > room) llen = room;
-	if (vlen > room - llen) vlen = room - llen;
+	int vlen = strlen(r.value);
+	if (vlen && llen + 1 + vlen > cols)
+	{
+		int keep = cols - 1 - llen;
+		if (keep < 16) keep = 16;
+		if (keep > cols - 2) keep = cols - 2;
+		if (vlen > keep) vlen = keep;
+	}
+	int lroom = cols - (vlen ? vlen + 1 : 0);
 
 	char text[32];
 	cv.setBrushColor(bg);
 	cv.setPenColor(fg);
-	snprintf(text, sizeof(text), "%.*s", llen, r.label);
-	Text(cv, font, x + textOff, ty, text);
+	if (lroom > 0)
+	{
+		FitName(text, lroom, r.label);
+		Text(cv, font, x + textOff, ty, text);
+	}
 	if (vlen > 0)
 	{
-		snprintf(text, sizeof(text), "%.*s", vlen, r.value);
+		FitName(text, vlen, r.value);
 		cv.setPenColor(valueFg);
 		Text(cv, font, x + textOff + (cols - vlen) * 16, ty, text);
 	}
@@ -215,8 +303,8 @@ void DrawScrollbar(fabgl::Canvas& cv, int y, int h, int top, int visible, int co
 	int len = h * visible / count;
 	if (len < 6) len = 6;
 	int pos = (h - len) * top / (count - visible);
-	FillBox(cv, T_DKGREY, x + 2, y, x + 3, y + h - 1);
-	FillBox(cv, T_ACCENT, x, y + pos, x + 5, y + pos + len - 1);
+	FillBox(cv, T_ACCENT, x + 2, y, x + 3, y + h - 1);
+	FillBox(cv, T_TEXT, x, y + pos, x + 5, y + pos + len - 1);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -241,41 +329,41 @@ void DrawSmallIcon(fabgl::Canvas& cv, int icon, int x, int y,
 	switch (icon)
 	{
 		case ICON_DISK:         // 5.25" diskette: jacket, label, hub, head slot
-			IBox(cv, grey ? T_GREY : T_BG, x, y, 3, 0, 12, 11);
-			IBox(cv, grey ? T_DKGREY : T_YELLOW, x, y, 5, 1, 10, 3);
+			IBox(cv, grey ? T_DIM : T_INK, x, y, 3, 0, 12, 11);
+			IBox(cv, grey ? T_GREY : T_YELLOW, x, y, 5, 1, 10, 3);
 			IBox(cv, T_TEXT, x, y, 7, 6, 8, 7);
 			IBox(cv, T_TEXT, x, y, 7, 9, 8, 10);
 			break;
 		case ICON_HDD:          // drive box: case, front panel, activity light
-			IBox(cv, grey ? T_GREY : T_DKGREY, x, y, 1, 2, 14, 10);
-			IBox(cv, grey ? T_DKGREY : T_BG, x, y, 1, 7, 14, 10);
+			IBox(cv, grey ? T_DIM : T_GREY, x, y, 1, 2, 14, 10);
+			IBox(cv, grey ? T_GREY : T_INK, x, y, 1, 7, 14, 10);
 			if (!grey)
 				IBox(cv, T_GREEN, x, y, 11, 8, 13, 9);
 			break;
 		case ICON_MACHINE:      // computer: monitor with a green screen on its case
-			IBox(cv, T_DKGREY, x, y, 3, 0, 12, 6);
+			IBox(cv, T_GREY, x, y, 3, 0, 12, 6);
 			IBox(cv, T_GREEN, x, y, 4, 1, 11, 5);
-			IBox(cv, T_GREY, x, y, 1, 7, 14, 11);
-			IBox(cv, T_DKGREY, x, y, 3, 9, 12, 9);
+			IBox(cv, T_DIM, x, y, 1, 7, 14, 11);
+			IBox(cv, T_GREY, x, y, 3, 9, 12, 9);
 			break;
 		case ICON_KEYBOARD:     // keyboard: case, two rows of keys, space bar
-			IBox(cv, T_DKGREY, x, y, 0, 1, 15, 10);
+			IBox(cv, T_GREY, x, y, 0, 1, 15, 10);
 			for (int r = 0; r < 2; r++)
 				for (int k = 0; k < 5; k++)
 					IBox(cv, T_TEXT, x, y, 2 + k * 3 - r, 3 + r * 2, 3 + k * 3 - r, 3 + r * 2);
 			IBox(cv, T_TEXT, x, y, 4, 8, 11, 8);
 			break;
 		case ICON_SERIAL:       // serial plug: shell, pins, cable
-			IBox(cv, T_GREY, x, y, 2, 2, 13, 8);
+			IBox(cv, T_DIM, x, y, 2, 2, 13, 8);
 			for (int p = 0; p < 4; p++)
-				IBox(cv, T_BG, x, y, 4 + p * 2, 4, 4 + p * 2, 6);
+				IBox(cv, T_INK, x, y, 4 + p * 2, 4, 4 + p * 2, 6);
 			IBox(cv, fg, x, y, 7, 9, 8, 11);
 			break;
 		case ICON_CAPTURE:      // printed page
-			IBox(cv, T_GREY, x, y, 4, 0, 11, 11);
+			IBox(cv, T_DIM, x, y, 4, 0, 11, 11);
 			IBox(cv, T_TEXT, x, y, 5, 1, 10, 10);
 			for (int l = 0; l < 3; l++)
-				IBox(cv, T_DKGREY, x, y, 6, 3 + l * 3, 9, 3 + l * 3);
+				IBox(cv, T_GREY, x, y, 6, 3 + l * 3, 9, 3 + l * 3);
 			break;
 		case ICON_SPEED:        // gauge: half dial and a needle
 			IDisc(cv, T_YELLOW, x + 16, y + 7, 10);
@@ -310,19 +398,19 @@ void DrawBigIcon(fabgl::Canvas& cv, int icon, int x, int y,
 	switch (icon)
 	{
 		case ICON_DISK:         // 5.25" diskette: jacket, label, hub ring, head slot, notch
-			IBox(cv, grey ? T_GREY : T_BG, x, y, 4, 0, 27, 25);
-			IBox(cv, grey ? T_DKGREY : T_YELLOW, x, y, 7, 2, 24, 7);
-			IBox(cv, grey ? T_GREY : T_ORANGE, x, y, 7, 2, 24, 3);
+			IBox(cv, grey ? T_DIM : T_INK, x, y, 4, 0, 27, 25);
+			IBox(cv, grey ? T_GREY : T_YELLOW, x, y, 7, 2, 24, 7);
+			IBox(cv, grey ? T_DIM : T_ORANGE, x, y, 7, 2, 24, 3);
 			IDisc(cv, T_TEXT, x + 32, y + 14, 8);
-			IDisc(cv, grey ? T_GREY : T_BG, x + 32, y + 14, 3);
+			IDisc(cv, grey ? T_DIM : T_INK, x + 32, y + 14, 3);
 			IBox(cv, T_TEXT, x, y, 15, 20, 16, 24);
 			IBox(cv, bg, x, y, 27, 5, 27, 7);
 			break;
 		case ICON_HDD:
-			IBox(cv, grey ? T_GREY : T_DKGREY, x, y, 2, 5, 29, 21);
-			IBox(cv, grey ? T_DKGREY : T_BG, x, y, 2, 16, 29, 21);
+			IBox(cv, grey ? T_DIM : T_GREY, x, y, 2, 5, 29, 21);
+			IBox(cv, grey ? T_GREY : T_INK, x, y, 2, 16, 29, 21);
 			for (int v = 0; v < 2; v++)
-				IBox(cv, grey ? T_DKGREY : T_GREY, x, y, 5, 8 + v * 3, 20, 8 + v * 3);
+				IBox(cv, grey ? T_GREY : T_DIM, x, y, 5, 8 + v * 3, 20, 8 + v * 3);
 			if (!grey)
 				IBox(cv, T_GREEN, x, y, 23, 18, 26, 19);
 			break;
@@ -391,7 +479,7 @@ int Popup(const char* title, const char* msg1, const char* msg2, int count, RowF
 
 	int ry = y + POPUP_TITLE_H + 8;
 	cv.setBrushColor(T_TEXT);
-	cv.setPenColor(T_BG);
+	cv.setPenColor(T_INK);
 	for (int i = 0; i < 2; i++)
 	{
 		if (!msgs[i][0])

@@ -37,6 +37,16 @@ protected:
 		for (int i = 0; i < VGA16_LinesCount; ++i)
 			m_lines[i] = (uint8_t*) heap_caps_malloc(getViewPortWidth(), MALLOC_CAP_DMA);
 	}
+
+public:
+	// FabGL resolves the colours drawn through fabgl::Canvas to palette
+	// indices with a table it builds once, from its own default palette;
+	// setPaletteItem() leaves it alone. Whoever loads a palette and then
+	// draws with Canvas rebuilds the table here.
+	void refreshColorLookup() { updateRGB2PaletteLUT(); }
+
+	// the index a Canvas colour resolves to, for checking a palette
+	int paletteIndexOf(fabgl::RGB888 const & color) { return RGB888toPaletteIndex(color); }
 };
 
 extern AppleVGAController DisplayController;
