@@ -28,6 +28,7 @@
 #include "src/VGA/VGA.h"
 #include "src/Tools/Log.h"
 #include "src/Supervisor/Supervisor.h"
+#include "src/Supervisor/SupervisorUI.h"
 #include "src/Tools/Bootloader.h"
 #include "src/BuildConfig.h"
 #include "src/Version.h"
@@ -201,6 +202,11 @@ void setup()
     machine->device.speedMode = Settings::LoadSpeed(FramePacer::SPEED_1X);
 #endif
     pacer.SetSpeed((FramePacer::Speed)machine->device.speedMode);
+    // menu trace and serial keys; a development build can start with them on
+#ifndef SUP_DEBUG_DEFAULT
+#define SUP_DEBUG_DEFAULT 0
+#endif
+    SupUI::debugOn = Settings::LoadDebug(SUP_DEBUG_DEFAULT);
     supervisor = new Supervisor(machine);
 
     // Disks that were mounted when the machine was switched: the switch
@@ -296,19 +302,38 @@ static void WaitMicros(uint32_t us)
         ;
 }
 
+// F1 typed at a serial terminal, which opens the supervisor like the key
+// does. Only looked for with the debug setting on and no Super Serial Card,
+// whose data the port otherwise carries.
+static bool SerialMenuKey()
+{
+    static SerialKeyDecoder decoder;
+    while (Serial.available())
+        if (decoder.Feed((uint8_t)Serial.read()) == K_F1)
+            return true;
+    return false;
+}
+
 // One video frame: emulate (or run the supervisor), render, count FPS.
 // Runs in EmulationTask on core 0, see setup().
 static void RunFrame()
 {
     bool drew = true;
     bool paced = false;
-    if (supervisor->IsActive())
+    if (SupUI::debugOn && machine->device.SerialSlot() == 0 && Serial.available() && SerialMenuKey())
+        supervisor->Open();
+    if (supervisor->Requested())
     {
-        supervisor->Update();
-        if (supervisor->IsActive())      // may have closed itself on ESC
-            supervisor->Render(vga);
+        // The menu draws in the Apple's palette over the Apple's picture:
+        // make sure both are on screen, even on the very first frame.
+        machine->Render(vga, frame);
+        supervisor->Run();               // returns when the menu is closed
+        // a new schedule, rather than catching up on the time in the menu
+        pacer.SetSpeed((FramePacer::Speed)machine->device.speedMode);
+        fpsMillis = millis();
+        fpscount = 0;
+        return;
     }
-    else
     {
         // F4 changed the speed: apply it, and keep it for the next boot
         if (pacer.GetSpeed() != machine->device.speedMode)
