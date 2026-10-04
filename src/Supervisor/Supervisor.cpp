@@ -36,6 +36,9 @@
 
 using namespace SupUI;
 
+// the machine, for the row callbacks of lists and popups
+static Apple2Machine* popupMachine;
+
 extern fabgl::Keyboard *keyboard_ptr;
 extern fabgl::Canvas Canvas;
 
@@ -138,12 +141,12 @@ void Supervisor::Run()
 	requested = false;
 	serialKeys = (machine->device.SerialSlot() == 0);
 	Begin(keyboard_ptr);
+	popupMachine = machine;
 	Trace("menu: opened\n");
 
-	// what the menu can change and only saves on the way out
-	uint8_t kbd0 = CurrentKeyboardLayoutId();
-	uint8_t speed0 = machine->device.speedMode;
-	bool debug0 = debugOn;
+	keyboard0 = CurrentKeyboardLayoutId();
+	speed0 = machine->device.speedMode;
+	debug0 = debugOn;
 	bool reset = false;
 
 	// why the saved model could not boot, if it could not: said once
@@ -179,17 +182,27 @@ void Supervisor::Run()
 		}
 	}
 
-	if (CurrentKeyboardLayoutId() != kbd0)
-		Settings::SaveKeyboard(CurrentKeyboardLayoutId());
-	if (machine->device.speedMode != speed0)
-		Settings::SaveSpeed(machine->device.speedMode);
-	if (debugOn != debug0)
-		Settings::SaveDebug(debugOn);
+	SaveSettings();
 	if (reset)
 		machine->Reset();
 	Trace("menu: closed%s\n", reset ? ", reset" : "");
 	// the menu drew over the Apple's picture: have it repaint everything
 	machine->device.InvalidateRenderCache();
+}
+
+// Keyboard layout, speed and the debug setting take effect as they are
+// changed; NVS only has to remember them, and only when they moved.
+void Supervisor::SaveSettings()
+{
+	if (CurrentKeyboardLayoutId() != keyboard0)
+		Settings::SaveKeyboard(CurrentKeyboardLayoutId());
+	if (machine->device.speedMode != speed0)
+		Settings::SaveSpeed(machine->device.speedMode);
+	if (debugOn != debug0)
+		Settings::SaveDebug(debugOn);
+	keyboard0 = CurrentKeyboardLayoutId();
+	speed0 = machine->device.speedMode;
+	debug0 = debugOn;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -459,7 +472,6 @@ void Supervisor::DrawListRow(int index, int top, bool hl)
 }
 
 // the mount popup's rows: each floppy drive and what it holds, then Cancel
-static Apple2Machine* popupMachine;
 
 static void MountRow(int idx, Row& row)
 {
@@ -511,7 +523,6 @@ void Supervisor::MountDialog(const char* path)
 	for (int d = 1; d >= 0; d--)
 		if (!machine->device.HasFloppy(d))
 			first = d;
-	popupMachine = machine;
 	int drive = Popup("Mount disk on", name, nullptr, 3, MountRow, first);
 	if (drive < 0 || drive >= 2)
 		return;
@@ -709,6 +720,204 @@ void Supervisor::DiskMenu()
 //////////////////////////////////////////////////////////////////////////
 // Setup
 
+enum { SET_MACHINE, SET_KEYBOARD, SET_SERIAL, SET_CAPTURE, SET_SPEED, SET_DEBUG, SET_COUNT };
+
+static const char* const serialNames[3] = { "Not installed", "Slot 1 (printer)", "Slot 2 (terminal/modem)" };
+
+static void SetupRow(int idx, Row& row)
+{
+	switch (idx)
+	{
+		case SET_MACHINE:
+			strcpy(row.label, "Machine");
+			strlcpy(row.value, popupMachine->profile.name, sizeof(row.value));
+			break;
+		case SET_KEYBOARD:
+			strcpy(row.label, "Keyboard");
+			strlcpy(row.value, GetKeyboardLayoutProfile(CurrentKeyboardLayoutId())->name, sizeof(row.value));
+			break;
+		case SET_SERIAL:
+		{
+			strcpy(row.label, "Serial card");
+			int slot = popupMachine->device.SerialSlot();
+			if (slot)
+				snprintf(row.value, sizeof(row.value), "Slot %d", slot);
+			else
+				strcpy(row.value, "Not installed");
+			break;
+		}
+		case SET_CAPTURE:
+			strcpy(row.label, "SD capture");
+			strcpy(row.value, Settings::LoadPrintCapture(false) ? "ON" : "OFF");
+			break;
+		case SET_SPEED:
+			strcpy(row.label, "Speed");
+			strcpy(row.value, popupMachine->device.speedMode == FramePacer::SPEED_MAX ? "MAX" : "1X");
+			break;
+		case SET_DEBUG:
+			strcpy(row.label, "Debug log");
+			strcpy(row.value, debugOn ? "ON" : "OFF");
+			break;
+	}
+}
+
+static int SetupIcon(int idx)
+{
+	static const uint8_t icons[SET_COUNT] =
+		{ ICON_MACHINE, ICON_KEYBOARD, ICON_SERIAL, ICON_CAPTURE, ICON_SPEED, ICON_SPIDER };
+	return icons[idx];
+}
+
 void Supervisor::SetupMenu()
 {
+	int sel = 0;
+	while (!closeAll)
+	{
+		sel = RunList("Setup", SET_COUNT, SetupRow, SetupIcon, sel);
+		if (sel < 0)
+			return;
+		switch (sel)
+		{
+			case SET_MACHINE:  MachineMenu(); break;
+			case SET_KEYBOARD: KeyboardMenu(); break;
+			case SET_SERIAL:   SerialMenu(); break;
+			case SET_CAPTURE:
+			{
+				// the capture file follows the setting at once
+				bool capture = !Settings::LoadPrintCapture(false);
+				if (Settings::SavePrintCapture(capture))
+					machine->SetSerialSlot(machine->device.SerialSlot(), capture);
+				else
+					Notice("Not saved", "Cannot write settings (NVS).", nullptr);
+				break;
+			}
+			case SET_SPEED:
+				machine->device.speedMode =
+					machine->device.speedMode == FramePacer::SPEED_MAX ? FramePacer::SPEED_1X : FramePacer::SPEED_MAX;
+				break;
+			case SET_DEBUG:
+				debugOn = !debugOn;          // saved when the menu closes
+				break;
+		}
+	}
+}
+
+// Machine model. Switching saves the choice and the mounted disks in NVS and
+// restarts the ESP32, so memory is laid out from scratch for the new model;
+// setup() mounts the disks again.
+
+static const char* machineMissing[MACHINE_COUNT];   // first missing ROM per model, NULL = bootable
+
+static void MachineRow(int idx, Row& row)
+{
+	strlcpy(row.label, GetMachineProfile(idx).name, sizeof(row.label));
+	if (idx == popupMachine->profile.id)
+		strcpy(row.value, "active");
+	else if (machineMissing[idx])
+	{
+		// a model whose ROMs are not in /roms cannot be picked
+		snprintf(row.value, sizeof(row.value), "needs %s", machineMissing[idx]);
+		row.dim = true;
+	}
+}
+
+static int MachineIcon(int) { return ICON_MACHINE; }
+
+void Supervisor::MachineMenu()
+{
+	for (int i = 0; i < MACHINE_COUNT; i++)
+		machineMissing[i] = RomLoader::FirstMissing(GetMachineProfile(i));
+
+	int id = RunList("Machine", MACHINE_COUNT, MachineRow, MachineIcon, machine->profile.id);
+	if (id < 0 || id == machine->profile.id)
+		return;
+
+	char msg[40];
+	if (machineMissing[id])
+	{
+		snprintf(msg, sizeof(msg), "Needs %s/%s", ROM_DIR, machineMissing[id]);
+		Notice("ROM missing", msg, "on the SD card.");
+		return;
+	}
+	snprintf(msg, sizeof(msg), "%s?", GetMachineProfile(id).name);
+	if (!Confirm("Switch machine", "Restart the board as", msg))
+		return;
+
+	// restarting without the choice saved would only come back as this model
+	if (!Settings::SaveMachine(id))
+	{
+		Notice("Not saved", "Cannot write settings (NVS).", nullptr);
+		return;
+	}
+	Settings::SaveDisk(0, machine->device.GetDiskName(0).c_str());
+	Settings::SaveDisk(1, machine->device.GetDiskName(1).c_str());
+	Settings::SaveHardDisk(machine->device.hdd7.ImageName());
+	SaveSettings();
+
+	fabgl::Canvas& cv = Canvas;
+	DrawFrame(cv, "Machine", "");
+	snprintf(msg, sizeof(msg), "Restarting as %s...", GetMachineProfile(id).name);
+	cv.setBrushColor(T_BG);
+	cv.setPenColor(T_YELLOW);
+	TextCentered(cv, &fabgl::FONT_8x14, BOX_X, BOX_W, 92, msg);
+	cv.waitCompletion();
+	Trace("menu: restarting as %s\n", GetMachineProfile(id).name);
+	delay(400);                              // long enough to read
+	Bootloader::Restart();                   // back into this app, not the boot menu
+}
+
+// Keyboard layout. It only changes how FabGL turns scancodes into
+// characters, so it takes effect as soon as it is chosen.
+
+static void KeyboardRow(int idx, Row& row)
+{
+	strlcpy(row.label, GetKeyboardLayoutProfile(idx)->name, sizeof(row.label));
+	if (idx == CurrentKeyboardLayoutId())
+		strcpy(row.value, "active");
+}
+
+static int KeyboardIcon(int) { return ICON_KEYBOARD; }
+
+void Supervisor::KeyboardMenu()
+{
+	int id = RunList("Keyboard layout", KEYBOARD_LAYOUT_COUNT, KeyboardRow, KeyboardIcon,
+	                 CurrentKeyboardLayoutId());
+	if (id >= 0)
+		ApplyKeyboardLayout((uint8_t)id, keyboard_ptr);
+}
+
+// Super Serial Card. Its line is the ESP32's USB serial port, so installing
+// it takes the port from the firmware log and from the menu's serial keys.
+// Like mounting a disk it takes effect at once; the Apple sees the change at
+// its next PR#/IN#.
+
+static void SerialRow(int idx, Row& row)
+{
+	strcpy(row.label, serialNames[idx]);
+	if (idx == popupMachine->device.SerialSlot())
+		strcpy(row.value, "active");
+}
+
+static int SerialIcon(int) { return ICON_SERIAL; }
+
+void Supervisor::SerialMenu()
+{
+	int cur = machine->device.SerialSlot();
+	int slot = RunList("Serial card", 3, SerialRow, SerialIcon, (cur >= 1 && cur <= 2) ? cur : 0);
+	if (slot < 0 || slot == cur)
+		return;
+
+	if (slot && RomLoader::Check(SSC_ROM, SSC_ROM_SIZE) != ROM_OK)
+	{
+		Notice("ROM missing", "Needs " ROM_DIR "/" SSC_ROM, "on the SD card.");
+		return;
+	}
+	if (!machine->SetSerialSlot(slot, Settings::LoadPrintCapture(false)))
+	{
+		Notice("Serial card", "That slot is taken.", nullptr);
+		return;
+	}
+	serialKeys = (slot == 0);
+	if (!Settings::SaveSerial((uint8_t)slot))
+		Notice("Not saved", "Cannot write settings (NVS).", nullptr);
 }

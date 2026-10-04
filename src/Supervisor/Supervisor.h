@@ -46,6 +46,11 @@ private:
 	bool requested;
 	bool bootNoteShown;                  // the boot fallback note is said once
 
+	// what the menu changes at once and saves to NVS on the way out
+	uint8_t keyboard0, speed0;
+	bool debug0;
+	void SaveSettings();
+
 	// SD directory shown in the disk manager. The entries live in PSRAM,
 	// allocated the first time the disk manager opens.
 	SupEntry* entries;
@@ -57,6 +62,9 @@ private:
 	void DrawMain(int selected);
 	void AboutScreen();
 	void SetupMenu();
+	void MachineMenu();
+	void KeyboardMenu();
+	void SerialMenu();
 
 	void DiskMenu();
 	bool AtRoot() { return curPath[1] == '\0'; }
