@@ -194,15 +194,18 @@ nibble; `row(y)` returns a whole scanline, and `pair()` writes two identical
 pixels as one byte, which is all double-width content needs. `setPalette()`
 loads the 16 entries.
 
-**`Supervisor`** (`src/Supervisor/`) is the F1 menu. It pauses emulation (the
-frame loop skips `machine->Run()` while it is active), browses the SD card,
-mounts/unmounts disk images via `Apple2Machine::Mount`/`Unmount`, switches
-machine and shows the ABOUT page. Its actions are a row of buttons above the
-file list, reached with all four arrow keys. It paints directly into the live framebuffer in
-its own palette and calls `Apple2Device::InvalidateRenderCache()` on close so the
-emulator repaints fully. Its font has no box-drawing glyphs and no lowercase
-(glyphs `0x20`-`0x5F`), so every bar, rule, button and panel is a pixel fill via
-`VGA::fillRect`.
+**`Supervisor`** (`src/Supervisor/`) is the F1 menu. `Supervisor::Run()` is
+called from the frame loop and returns only when the menu is closed, which is
+what pauses emulation. A grid of tiles leads to the disk manager (drive buttons
+D1, D2 and HD above the SD card browser), the Setup list (machine, keyboard,
+serial card, capture, speed, debug log) and the About page; each screen is a
+function with its own key loop. It is split in three: `SupervisorLogic.h` is
+the hardware-free part (grid and list movement, the serial key decoder, name
+fitting) and is tested on the host by `tests/host/run-supervisor-tests.sh`;
+`SupervisorUI` holds the theme and the frame, row, popup and icon primitives,
+drawn with FabGL's `Canvas` and its fonts at double width; `Supervisor` holds
+the screens. It calls `Apple2Device::InvalidateRenderCache()` on close so the
+emulator repaints fully.
 
 ## Constraints
 
@@ -291,20 +294,31 @@ calls `InvalidateFpsOverlayRegion()` for that corner on every overlaid frame
 **Any other overlay drawn on top of the emulated screen needs the same
 treatment**, or it will leave debris behind when it moves or disappears.
 
-### The supervisor repaints only when dirty
+### The supervisor repaints only what changed
 
-Because the supervisor shares the live framebuffer with the emulator, it
-repaints only when its `dirty` flag is set — every keypress sets it. Clearing
-and repainting on every frame is visible as flicker. Any future state change
-that does not originate from a keypress must set `dirty` itself.
+The supervisor draws into the live framebuffer, so clearing and repainting a
+whole screen on every keypress is visible as flicker. A move repaints the two
+tiles or rows the cursor left and reached; a list repaints fully only when it
+scrolls, and a screen only after a popup closed over it.
 
-### The palette has one owner at a time
+### The supervisor draws in the Apple's palette
 
-The emulator and the supervisor share one 16-entry palette. The supervisor loads
-its own on its first repaint after `Open()`; `InvalidateRenderCache()` makes
-`AppleVideo` put the Apple palette back, clear the border and repaint every cell
-on its next frame. Anything else that draws in its own colours has to follow the
-same handover.
+The framebuffer holds 4-bit indices into one 16-entry palette, and the Apple
+picture stays visible around the menu box. The supervisor therefore never loads
+a palette of its own: its theme colours in `SupervisorUI.h` are entries of
+`applePalette` (`AppleVideo.cpp`), repeated by value, which FabGL maps back to
+the same indices. A change to `applePalette` has to be mirrored there. The
+frame loop renders one Apple frame before `Run()`, so the palette is loaded
+even when the menu opens before the first emulated frame.
+
+### The supervisor can be driven from the serial port
+
+With the Debug log setting on (NVS key `debug`, or a build with
+`-DSUP_DEBUG_DEFAULT=1`) every selection prints a line such as
+`menu: Setup > Speed 1X`, and VT key sequences on the USB serial port act as
+keys: arrows, Enter, Esc, Tab, PgUp/PgDn, Home/End, and F1 (`ESC O P`) to open
+or close the menu. Both stop while the Super Serial Card is installed, since
+the port is then the card's line.
 
 ### No partitions.csv in the sketch folder
 
