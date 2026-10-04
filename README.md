@@ -43,7 +43,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 <td width="50%"><img src="pictures/v030-iie-80col.png" width="400" alt="Apple //e 80-column text"><br><sub>//e after <code>PR#3</code>: 80 columns, upper and lower case, and a line of MouseText.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/v070-supervisor-browser.png" width="400" alt="Supervisor menu with buttons and SD card browser"><br><sub><b>F1</b> supervisor: the buttons and the SD card browser, with both drives empty.</sub></td>
+<td width="50%"><img src="pictures/supervisor-tiles-menu.png" width="400" alt="Supervisor menu with icon tiles"><br><sub><b>F1</b> supervisor: Disks, Setup, Reset, About and Resume, over the paused Apple screen.</sub></td>
 <td width="50%"><img src="pictures/v030-supervisor-machine.png" width="400" alt="Machine picker"><br><sub><b>MACHINE</b>: switch between the Apple ][+ and the Apple //e.</sub></td>
 </tr>
 <tr>
