@@ -39,24 +39,24 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 
 <table>
 <tr>
-<td width="50%"><img src="pictures/v030-iie-boot.png" width="400" alt="Apple //e boot screen"><br><sub>Apple //e (enhanced), cold start with no disk mounted.</sub></td>
+<td width="50%"><img src="pictures/prodos33.png" width="400" alt="Apple II prodos boot screen"><br><sub>Apple II, Prodos 3.3 disk mounted.</sub></td>
 <td width="50%"><img src="pictures/v030-iie-80col.png" width="400" alt="Apple //e 80-column text"><br><sub>//e after <code>PR#3</code>: 80 columns, upper and lower case, and a line of MouseText.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/supervisor-tiles-menu.png" width="400" alt="Supervisor menu with icon tiles"><br><sub><b>F1</b> supervisor: Disks, Setup, Reset, About and Resume, over the paused Apple screen.</sub></td>
-<td width="50%"><img src="pictures/v030-supervisor-machine.png" width="400" alt="Machine picker"><br><sub><b>MACHINE</b>: switch between the Apple ][+ and the Apple //e.</sub></td>
+<td width="50%"><img src="pictures/supervisorMenu.png" width="400" alt="Supervisor menu"><br><sub><b>F1</b> supervisor: Disks, Setup, Reset, About and Resume, over the paused Apple screen.</sub></td>
+<td width="50%"><img src="pictures/Setup.png" width="400" alt="Setup Menu"><br><sub><b>SETUP</b>: switch between the Apple ][+ and the Apple //e.(machine), Change Keyboard languaje, Enable Disable serial card, Capture printer, Change emulator speed, Toggle Debug on esp serial port</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/v030-supervisor-about.png" width="400" alt="About page"><br><sub><b>ABOUT</b>: machine, CPU, firmware version and credits.</sub></td>
-<td width="50%"><img src="pictures/v030-iiplus-boot.png" width="400" alt="Apple ][+ BASIC prompt"><br><sub>Apple ][+, cold start — straight to the Applesoft prompt.</sub></td>
+<td width="50%"><img src="pictures/About.png" width="400" alt="About page"><br><sub><b>ABOUT</b>: machine, CPU, firmware version and credits.</sub></td>
+<td width="50%"><img src="pictures/DKK.png" width="400" alt="DONKEY KONG"><br><sub>Donkey Kong.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/v030-iiplus-lores.png" width="400" alt="Lo-res colour bars"><br><sub>The 16 lo-res colours, drawn by a four-line Applesoft program.</sub></td>
-<td width="50%"><img src="pictures/v030-donkeykong-title.png" width="400" alt="Donkey Kong title screen"><br><sub><i>Donkey Kong</i> title screen — hires mode.</sub></td>
+<td width="50%"><img src="pictures/DKK1.png" width="400" alt="DKK GAME"><br><sub>Donkey Kong Game.</sub></td>
+<td width="50%"><img src="pictures/tps1.png" width="400" alt="The print Shop title screen"><br><sub><i>The Print Shop</i> title screen.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/v030-karateka-credits.png" width="400" alt="Karateka credits"><br><sub><i>Karateka</i> booting on the //e.</sub></td>
-<td width="50%"><img src="pictures/v030-karateka-story.png" width="400" alt="Karateka story screen"><br><sub><i>Karateka</i> story screen.</sub></td>
+<td width="50%"><img src="pictures/tps2.png" width="400" alt="The print Shop"><br><sub><i>The Print Shop</i> main menu.</sub></td>
+<td width="50%"><img src="pictures/Machinetype.png" width="400" alt="Supervisor Setup Submenu"><br><sub><i>Choose Machine Type</i> Apple II or IIe.</sub></td>
 </tr>
 </table>
 
