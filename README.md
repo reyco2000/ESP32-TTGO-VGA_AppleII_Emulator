@@ -43,7 +43,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 <td width="50%"><img src="pictures/v030-iie-80col.png" width="400" alt="Apple //e 80-column text"><br><sub>//e after <code>PR#3</code>: 80 columns, upper and lower case, and a line of MouseText.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/supervisorMenu.png" width="400" alt="Supervisor menu"><br><sub><b>F1</b> supervisor: Disks, Setup, Reset, About and Resume, over the paused Apple screen.</sub></td>
+<td width="50%"><img src="pictures/SupervisorMenu.png" width="400" alt="Supervisor menu"><br><sub><b>F1</b> supervisor: Disks, Setup, Reset, About and Resume, over the paused Apple screen.</sub></td>
 <td width="50%"><img src="pictures/Setup.png" width="400" alt="Setup Menu"><br><sub><b>SETUP</b>: switch between the Apple ][+ and the Apple //e.(machine), Change Keyboard languaje, Enable Disable serial card, Capture printer, Change emulator speed, Toggle Debug on esp serial port</sub></td>
 </tr>
 <tr>
@@ -51,7 +51,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 <td width="50%"><img src="pictures/DKK.png" width="400" alt="DONKEY KONG"><br><sub>Donkey Kong.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/DKK1.png" width="400" alt="DKK GAME"><br><sub>Donkey Kong Game.</sub></td>
+<td width="50%"><img src="pictures/DKK!.png" width="400" alt="DKK GAME"><br><sub>Donkey Kong Game.</sub></td>
 <td width="50%"><img src="pictures/tps1.png" width="400" alt="The print Shop title screen"><br><sub><i>The Print Shop</i> title screen.</sub></td>
 </tr>
 <tr>
