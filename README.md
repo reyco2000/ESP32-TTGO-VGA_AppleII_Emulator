@@ -2,6 +2,13 @@
 
 An Apple ][+ and Apple //e (enhanced) emulator that runs entirely on an ESP32 (LilyGO TTGO VGA32-class board), rendering to a VGA monitor via the [FabGL](https://github.com/fdivitto/FabGL) library. A PS/2 keyboard provides input, and `.dsk`, `.do`, `.po` and `.nib` floppy disk images, plus `.hdv` / `.2mg` ProDOS hard disks, are loaded from an SD card — no host computer involved.
 
+## What's new in 0.10.0
+
+- **Tiled Supervisor menu (F1).** The menu is now a grid of icon tiles over the paused Apple screen: **Disks**, **Setup**, **Reset**, **About** and **Resume**. The arrow keys move the highlight, **Enter** opens a tile, **ESC** goes back one level and **F1** closes the menu from anywhere.
+- **Setup is one list.** **Machine**, **Keyboard**, **Serial card**, **SD capture**, **Speed** and **Debug log** are rows in a single Setup screen, instead of the old row of buttons.
+- **Disks** keeps the **D1**, **D2** and **HD** buttons above the SD card browser, which walks subdirectories. Mounting still never resets the machine.
+- **New blue theme** with the Apple logo stripes, in its own palette.
+
 ## What's new in 0.9.2
 
 - **Drive picker popup.** Selecting a floppy image in the F1 menu opens a window with **DRIVE 1** and **DRIVE 2** buttons, each showing the disk it holds. If the chosen drive already has a disk, a second window asks before replacing it (**CANCEL** is the default). A hard disk image asks the same when another one is mounted in slot 7.
@@ -43,7 +50,7 @@ Pixel-exact captures, read back from the ESP32's framebuffer.
 <td width="50%"><img src="pictures/v030-iie-80col.png" width="400" alt="Apple //e 80-column text"><br><sub>//e after <code>PR#3</code>: 80 columns, upper and lower case, and a line of MouseText.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="pictures/SupervisorMenu.png" width="400" alt="Supervisor menu"><br><sub><b>F1</b> supervisor: Disks, Setup, Reset, About and Resume, over the paused Apple screen.</sub></td>
+<td width="50%"><img src="pictures/supervisor-tiles-menu.png" width="400" alt="Supervisor tiled menu"><br><sub><b>F1</b> supervisor: Disks, Setup, Reset, About and Resume tiles, over the paused Apple screen.</sub></td>
 <td width="50%"><img src="pictures/Setup.png" width="400" alt="Setup Menu"><br><sub><b>SETUP</b>: switch between the Apple ][+ and the Apple //e.(machine), Change Keyboard languaje, Enable Disable serial card, Capture printer, Change emulator speed, Toggle Debug on esp serial port</sub></td>
 </tr>
 <tr>
@@ -233,10 +240,12 @@ Each file must be exactly the size shown. The serial log prints the CRC32 of eve
 
 - The machine powers on into BASIC with no disk, as whichever model was chosen last (the ][+ the first time).
 - Press **F1** to open the supervisor menu. The arrow keys move through the tiles and **Enter** opens one; **ESC** goes back one level and **F1** closes the menu from anywhere. In **Disks**, **Tab** (or Up from the first file) moves between the drive buttons **D1**, **D2**, **HD** and the file list. **Enter** on a disk image asks which drive takes it, and asks again before replacing a disk or mounting the same image twice; a hard disk image goes to **HD** (slot 7). **Enter** on a drive button that holds a disk asks to unmount it. Every confirmation starts on **No**.
-- **MACHINE** switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
-- **SERIAL** installs or removes the Super Serial Card, and turns the SD card capture file on and off (see [Super Serial Card](#super-serial-card)).
-- **KEYBOARD** picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
-- Use the menu's **RESET** button (or `PR#6` from BASIC) to boot a mounted disk. The **D1** and **D2** buttons show the mounted disks; pressing one ejects it.
+- **Setup** holds the machine and emulator settings, one row each:
+  - **Machine** switches between the Apple ][+ and the Apple //e. The choice is saved and the emulator restarts into it, remounting the disks that were in the drives.
+  - **Keyboard** picks the PS/2 keyboard layout: US, Latin American, or Brazilian ABNT2. It takes effect as soon as you choose it, with no restart, and is remembered for the next boot.
+  - **Serial card** installs or removes the Super Serial Card, and **SD capture** turns the SD card capture file on and off (see [Super Serial Card](#super-serial-card)).
+  - **Speed** and **Debug log** set the emulator speed and the serial debug output.
+- **Reset** (or `PR#6` from BASIC) boots a mounted disk. The **D1** and **D2** buttons in **Disks** show the mounted disks; pressing one ejects it.
 - On the //e, `PR#3` turns on 80-column text; **Esc** then **4** or **8** switches between 40 and 80 columns, and **Esc** then **Ctrl+Q** turns the 80-column firmware off.
 
 | Keys | Action |
